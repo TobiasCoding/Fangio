@@ -126,9 +126,16 @@ async function handleAlarm(alarm: chrome.alarms.Alarm): Promise<void> {
     case ALARM_UPDATE_CHECK:
       await checkForUpdate();
       break;
-    case ALARM_STARTUP_SWEEP:
+    case ALARM_STARTUP_SWEEP: {
+      // Close ops deferred by the startup grace (interrupted by a crash/restart) must be
+      // resolved now too; otherwise their records stay 'open' with pendingClose (and tabs
+      // with those URLs stay untracked) until the 15-minute maintenance alarm.
+      const r = await resumeOps();
+      if (r.continuation) void r.continuation;
       await tracker.reconcile();
+      scheduleBadge();
       break;
+    }
   }
 }
 

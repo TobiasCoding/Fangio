@@ -65,10 +65,15 @@ Cuando aparece una pestaña rastreable no vinculada, se busca en este orden:
    (`origin.windowOrdinal`, `origin.index`).
 4. Registro con `implicitCloseAt` en los últimos `REBIND_WINDOW_MS` y misma URL
    (Ctrl+Shift+T, «reabrir ventana cerrada»). Acción `rebind`.
+4b. Sólo durante el período de gracia de arranque de una sesión nueva: registro cerrado por
+   una operación de Fangio (`archived`/`trash`) como mucho `RESTORED_AFTER_CLOSE_WINDOW_MS`
+   (10 min) **antes** de que empezara la sesión, con la misma URL. Es el caso del navegador
+   que restaura pestañas que acabábamos de cerrar porque se cortó (crash, corte de luz)
+   antes de guardar la sesión: se reutiliza la referencia en lugar de duplicarla. Acción `rebind`.
 5. Si nada coincide → registro nuevo.
 
-Nunca se re-vinculan registros archivados explícitamente: dos pestañas iguales no se
-asumen iguales en estado (ver Duplicados).
+Fuera de la regla 4b, nunca se re-vinculan registros archivados explícitamente: dos pestañas
+iguales no se asumen iguales en estado (ver Duplicados).
 
 ## Pipeline de cierre (archivar / papelera)
 
@@ -143,7 +148,9 @@ el objetivo de pestañas abiertas). Pestañas de incógnito se ignoran por compl
 ## Sesión y reconciliación
 
 `sessionId` vive en `chrome.storage.session` (se borra al reiniciar el navegador o recargar
-la extensión). `onStartup` guarda `startupAt` y programa `ALARM_STARTUP_SWEEP`.
+la extensión). `onStartup` guarda `startupAt` y programa `ALARM_STARTUP_SWEEP`; esa alarma
+ejecuta `resumeOps()` (resuelve los cierres interrumpidos que quedaron diferidos por la gracia)
+y luego `reconcile()`.
 `reconcile()` (al iniciar el worker si pasaron >5 min desde la última, en la alarma de
 mantenimiento y manualmente):
 1. Lista pestañas (`chrome.tabs.query({})`, excluye incógnito).

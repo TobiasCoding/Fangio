@@ -1,0 +1,8 @@
+{
+  "manifest_version": 3,
+  "name": "Fangio E2E helper",
+  "version": "1.0.0",
+  "description": "Test-only helper: builds large tab sets (unloaded/discarded) and observes tab events. Never shipped.",
+  "permissions": ["tabs", "tabGroups"],
+  "background": { "service_worker": "bg.js" }
+}

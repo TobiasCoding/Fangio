@@ -350,10 +350,29 @@ vuelve a verificar todo, empaqueta el zip y publica el release con sus notas y s
 
 ## Resultados de verificación
 
-<!-- El orquestador completa esta sección con el resumen de docs/TESTING.md. -->
+Resumen (detalle completo, metodología y limitaciones en [docs/TESTING.md](docs/TESTING.md)):
 
-_Pendiente._ El detalle de las pruebas realizadas (unitarias, de punta a punta y manuales)
-y sus resultados estará en [docs/TESTING.md](docs/TESTING.md).
+- **Pruebas unitarias:** 113/113 (persistencia, interrupciones, reglas, protecciones,
+  duplicados, importación/exportación, fallos de almacenamiento, 800+ registros).
+- **Pruebas de punta a punta en navegador real aislado** (Chromium de Playwright 156,
+  perfil temporal, nunca el navegador del usuario): **9/9 escenarios con 820 pestañas**
+  en 4 ventanas (fijadas, grupos, duplicados, audio).
+
+Números **medidos** (i7-12700K, 32 GB, Windows 11, una corrida):
+
+| Operación | Resultado |
+|---|---|
+| Instantánea al instalar con 820 pestañas abiertas | 820 registros en 391 ms, sin duplicados |
+| Asistente de importación: archivar 805 pestañas | 9,7 s, 0 fallos; fijadas/activa/audio/excluidas siguen abiertas |
+| Matar el navegador (taskkill) a mitad del cierre masivo | 0 referencias perdidas, 0 duplicados, en todos los momentos probados |
+| Reinicio | mismos identificadores, archivo intacto |
+| Reabrir 50 | 2,1 s, nunca más de 3 cargando a la vez |
+| Panel con 10.000 registros | carga 236–344 ms, búsqueda ~150 ms, ≤ 40 filas en el DOM |
+| Memoria del navegador | 1,22 GB con 820 pestañas → 0,80 GB tras reiniciar con 15 |
+
+No cubierto todavía: Chrome estable con un perfil real, el popup y los atajos en modo
+visible, y los tiempos reales de las alarmas. Ver la sección de limitaciones en
+[docs/TESTING.md](docs/TESTING.md).
 
 ## Seguridad y licencia
 
