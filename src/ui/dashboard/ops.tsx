@@ -2,11 +2,14 @@
 // a message to the background and reports the BulkResult as a toast.
 
 import type { BulkResult, RecordEdit } from '../../shared/messages';
+import type { RulePreview } from '../../shared/types';
 import { errMsg, send } from '../common/api';
 import { confirmDialog, toast } from '../common/feedback';
 import { fmtNum, plural } from '../common/format';
 import { reportBulk } from '../common/results';
 import { recordsStore, titleOf } from './data';
+import { needsBulkCloseConfirm, openRecordsOf } from './safety';
+import { previewCounts } from './views/PreviewTable';
 
 const REOPEN_CONFIRM_THRESHOLD = 20;
 
@@ -23,9 +26,65 @@ function protectedSkipped(res: BulkResult): string[] {
   return [...ids];
 }
 
-/** Archive or send to trash. Protected records are refused by the background; the toast offers forcing. */
-export async function closeRecords(ids: string[], target: 'archive' | 'trash'): Promise<BulkResult | null> {
+/** Best effort: how many of these tabs are pinned / active / audible right now. */
+async function liveTabFlags(tabIds: number[]): Promise<{ pinned: number; active: number; audible: number } | null> {
+  try {
+    const want = new Set(tabIds);
+    const tabs = (await chrome.tabs.query({})).filter((t) => t.id !== undefined && want.has(t.id));
+    return {
+      pinned: tabs.filter((t) => t.pinned).length,
+      active: tabs.filter((t) => t.active).length,
+      audible: tabs.filter((t) => t.audible).length,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Bulk close of open records: states how many tabs will close (and how many are pinned/active/audible). */
+async function confirmBulkClose(ids: string[], target: 'archive' | 'trash'): Promise<boolean> {
+  const byId = recordsStore.get().byId;
+  const open = openRecordsOf(ids, byId);
+  if (!needsBulkCloseConfirm(open.length, target)) return true;
+  const tabIds = open.map((id) => byId.get(id)?.live?.tabId).filter((t): t is number => typeof t === 'number');
+  const flags = await liveTabFlags(tabIds);
+  const special = flags
+    ? [
+        flags.pinned ? plural(flags.pinned, 'fijada', 'fijadas') : '',
+        flags.active ? plural(flags.active, 'activa', 'activas') : '',
+        flags.audible ? plural(flags.audible, 'con audio', 'con audio') : '',
+      ].filter(Boolean)
+    : [];
+  const dest = target === 'archive' ? 'se archivan' : 'van a la papelera';
+  return confirmDialog({
+    title: `¿Cerrar ${plural(open.length, 'pestaña abierta', 'pestañas abiertas')}?`,
+    body: (
+      <>
+        <p>
+          Se cierran <strong>{plural(open.length, 'pestaña', 'pestañas')}</strong> y {dest}
+          {ids.length > open.length ? ` (junto con ${plural(ids.length - open.length, 'referencia sin pestaña', 'referencias sin pestaña')})` : ''}.
+        </p>
+        {special.length > 0 && (
+          <p>
+            <strong>Atención:</strong> entre ellas hay {special.join(', ')}.
+          </p>
+        )}
+        <p class="muted">Cada referencia se guarda antes de cerrar su pestaña. Podés deshacerlo desde Registro.</p>
+      </>
+    ),
+    confirmLabel: target === 'archive' ? `Archivar ${fmtNum(ids.length)}` : `Enviar ${fmtNum(ids.length)} a la papelera`,
+    danger: target === 'trash',
+  });
+}
+
+/**
+ * Archive or send to trash. Protected records are refused by the background; the toast offers forcing.
+ * `confirm` (bulk selection): asks first when open tabs would be closed (5+, or any to the trash).
+ * Returns null when cancelled or failed.
+ */
+export async function closeRecords(ids: string[], target: 'archive' | 'trash', opts: { confirm?: boolean } = {}): Promise<BulkResult | null> {
   if (!ids.length) return null;
+  if (opts.confirm && !(await confirmBulkClose(ids, target))) return null;
   const verb = target === 'archive' ? 'Archivadas' : 'Enviadas a papelera';
   const forceLabel = target === 'archive' ? 'Desproteger y archivar' : 'Desproteger y enviar a papelera';
   try {
@@ -80,6 +139,40 @@ export async function reopenRecords(ids: string[]): Promise<void> {
   } catch (e) {
     fail('No se pudo reabrir', e);
   }
+}
+
+/**
+ * Before turning automation on: runs the rules preview and asks for confirmation
+ * showing how many tabs would be archived / trashed right now.
+ * Returns the preview when confirmed, null when cancelled (or the preview failed).
+ */
+export async function confirmEnableAutomation(): Promise<RulePreview | null> {
+  let preview: RulePreview;
+  try {
+    preview = await send({ type: 'previewRules' });
+  } catch (e) {
+    fail('No se pudo calcular la previsualización', e);
+    return null;
+  }
+  const n = previewCounts(preview);
+  const ok = await confirmDialog({
+    title: '¿Activar la automatización?',
+    body: (
+      <>
+        <p>
+          Si la activás ahora, en la próxima ejecución se archivarían <strong>{fmtNum(n.archive)}</strong> y se enviarían a la
+          papelera <strong>{fmtNum(n.trash)}</strong> de {plural(preview.openCount, 'pestaña abierta', 'pestañas abiertas')}
+          {preview.capped ? ' (limitado por el tope por ejecución)' : ''}.
+        </p>
+        <p class="muted">
+          Las pestañas protegidas, fijadas, activas, con audio y de sitios excluidos nunca se cierran automáticamente. Todo queda en
+          Registro y se puede deshacer.
+        </p>
+      </>
+    ),
+    confirmLabel: 'Activar',
+  });
+  return ok ? preview : null;
 }
 
 /** Focus the live tab of an open record. */

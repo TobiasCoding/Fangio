@@ -7,6 +7,7 @@ import {
   EXPORT_FORMAT,
   EXPORT_SCHEMA_VERSION,
   type ActionEntry,
+  type ActionKind,
   type ExportFileV1,
   type ImportJsonResult,
   type RecordState,
@@ -17,7 +18,7 @@ import { getAction, getRecordsByIds, getSettings, putActions, putRecords, putSet
 import { dbLock } from './mutex';
 import { newAction } from './records';
 import { broadcast, recordsChanged } from './runtime';
-import { domainOf, normalizeTags, sanitizeFavicon } from './url';
+import { domainOf, isTrackableUrl, normalizeTags, sanitizeFavicon } from './url';
 
 export function buildExport(
   records: readonly TabRecord[],
@@ -99,6 +100,15 @@ const OPTIONAL_NUMBERS = [
   'implicitCloseAt',
 ] as const;
 
+/** Import caps (a backup is untrusted input). */
+export const MAX_URL_LENGTH = 8192;
+export const MAX_PROJECT_LENGTH = 200;
+export const MAX_TAGS = 100;
+export const MAX_TAG_LENGTH = 100;
+const MAX_REASON_LENGTH = 2000;
+const MAX_ID_LENGTH = 200;
+const MAX_LIST = 1000;
+
 const isObj = (x: unknown): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x);
 const isNum = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x);
 const isStrArr = (x: unknown): x is string[] => Array.isArray(x) && x.every((v) => typeof v === 'string');
@@ -108,17 +118,20 @@ export function validateRecord(x: unknown, now = Date.now()): TabRecord | string
   if (!isObj(x)) return 'no es un objeto';
   if (typeof x.id !== 'string' || !x.id.trim() || x.id.length > 200) return 'id inválido';
   if (typeof x.url !== 'string' || !x.url) return 'url inválida';
+  if (x.url.length > MAX_URL_LENGTH) return 'url demasiado larga';
   try {
     new URL(x.url);
   } catch {
     return 'url inválida';
   }
+  if (!isTrackableUrl(x.url)) return 'url no permitida (sólo http, https, file y ftp)';
   if (typeof x.state !== 'string' || !STATES.has(x.state)) return 'estado inválido';
   if (x.title !== undefined && typeof x.title !== 'string') return 'título inválido';
   for (const k of ['protected', 'pending'] as const) if (x[k] !== undefined && typeof x[k] !== 'boolean') return `${k} inválido`;
   for (const k of ['note', 'project', 'lastReason', 'favIconUrl', 'domain'] as const)
     if (x[k] !== undefined && typeof x[k] !== 'string') return `${k} inválido`;
   for (const k of ['tags', 'previousUrls', 'mergedFrom'] as const) if (x[k] !== undefined && !isStrArr(x[k])) return `${k} inválido`;
+
   for (const k of ['createdAt', 'updatedAt', 'reopenCount', 'rev', ...OPTIONAL_NUMBERS] as const)
     if (x[k] !== undefined && x[k] !== null && !isNum(x[k])) return `${k} inválido`;
   if (x.origin !== undefined && !isObj(x.origin)) return 'origin inválido';
@@ -133,16 +146,20 @@ export function validateRecord(x: unknown, now = Date.now()): TabRecord | string
     state: x.state as RecordState,
     protected: x.protected === true,
     pending: x.pending === true,
-    tags: normalizeTags(x.tags ?? []),
-    project: ((x.project as string | undefined) ?? '').trim(),
+    tags: normalizeTags(((x.tags as string[] | undefined) ?? []).slice(0, MAX_LIST))
+      .map((t) => t.slice(0, MAX_TAG_LENGTH))
+      .slice(0, MAX_TAGS),
+    project: ((x.project as string | undefined) ?? '').trim().slice(0, MAX_PROJECT_LENGTH),
     note: ((x.note as string | undefined) ?? '').slice(0, MAX_NOTE_LENGTH),
     source: (x.source as TabRecord['source'] | undefined) ?? 'json-import',
     createdAt: isNum(x.createdAt) ? x.createdAt : now,
     updatedAt: isNum(x.updatedAt) ? x.updatedAt : 0,
     origin: {},
-    previousUrls: ((x.previousUrls as string[] | undefined) ?? []).slice(0, MAX_PREVIOUS_URLS),
+    previousUrls: ((x.previousUrls as string[] | undefined) ?? [])
+      .filter((u) => u.length <= MAX_URL_LENGTH && isTrackableUrl(u))
+      .slice(0, MAX_PREVIOUS_URLS),
     reopenCount: isNum(x.reopenCount) ? x.reopenCount : 0,
-    mergedFrom: (x.mergedFrom as string[] | undefined) ?? [],
+    mergedFrom: ((x.mergedFrom as string[] | undefined) ?? []).filter((s) => s.length <= MAX_ID_LENGTH).slice(0, MAX_LIST),
     live: null,
     pendingClose: null,
     rev: isNum(x.rev) ? x.rev : 0,
@@ -150,15 +167,76 @@ export function validateRecord(x: unknown, now = Date.now()): TabRecord | string
   const fav = sanitizeFavicon(x.favIconUrl as string | undefined);
   if (fav) rec.favIconUrl = fav;
   for (const k of OPTIONAL_NUMBERS) if (isNum(x[k])) rec[k] = x[k] as number;
-  if (typeof x.lastReason === 'string') rec.lastReason = x.lastReason;
+  if (typeof x.lastReason === 'string') rec.lastReason = x.lastReason.slice(0, MAX_REASON_LENGTH);
   if (isObj(x.origin)) {
     const o = x.origin;
     if (isNum(o.windowOrdinal)) rec.origin.windowOrdinal = o.windowOrdinal;
     if (isNum(o.index)) rec.origin.index = o.index;
-    if (typeof o.groupTitle === 'string') rec.origin.groupTitle = o.groupTitle;
-    if (typeof o.groupColor === 'string') rec.origin.groupColor = o.groupColor;
+    if (typeof o.groupTitle === 'string') rec.origin.groupTitle = o.groupTitle.slice(0, MAX_PROJECT_LENGTH);
+    if (typeof o.groupColor === 'string' && o.groupColor.length <= 20) rec.origin.groupColor = o.groupColor;
   }
   return rec;
+}
+
+const ACTION_KINDS = new Set<ActionKind>([
+  'install-snapshot',
+  'archive',
+  'trash',
+  'reopen',
+  'restore',
+  'purge',
+  'update',
+  'merge',
+  'user-closed',
+  'window-closed',
+  'rebind',
+  'import-json',
+  'settings',
+  'undo',
+]);
+
+const strIds = (x: unknown): string[] =>
+  Array.isArray(x) ? x.filter((v): v is string => typeof v === 'string' && v.length <= MAX_ID_LENGTH).slice(0, MAX_LIST * 10) : [];
+
+/**
+ * Imported log entries are informative only: whitelisted fields, capped strings,
+ * never undoable (no `before`), so nothing in a backup can drive an undo.
+ */
+export function validateAction(a: unknown): ActionEntry | null {
+  if (!isObj(a)) return null;
+  if (typeof a.id !== 'string' || !a.id || a.id.length > MAX_ID_LENGTH) return null;
+  if (!isNum(a.at)) return null;
+  if (typeof a.kind !== 'string' || !ACTION_KINDS.has(a.kind as ActionKind)) return null;
+  if (!Array.isArray(a.recordIds)) return null;
+  const out: ActionEntry = {
+    id: a.id,
+    at: a.at,
+    kind: a.kind as ActionKind,
+    auto: a.auto === true,
+    reason: typeof a.reason === 'string' ? a.reason.slice(0, MAX_REASON_LENGTH) : '',
+    recordIds: strIds(a.recordIds),
+    undoable: false,
+  };
+  if (typeof a.ruleId === 'string' && a.ruleId.length <= MAX_ID_LENGTH) out.ruleId = a.ruleId;
+  if (isNum(a.undoneAt)) out.undoneAt = a.undoneAt;
+  if (typeof a.undoOf === 'string' && a.undoOf.length <= MAX_ID_LENGTH) out.undoOf = a.undoOf;
+  const items = (x: unknown, key: 'reason' | 'error') =>
+    Array.isArray(x)
+      ? x
+          .filter(isObj)
+          .slice(0, MAX_LIST)
+          .map((it) => {
+            const o: Record<string, unknown> = { [key]: typeof it[key] === 'string' ? (it[key] as string).slice(0, MAX_REASON_LENGTH) : '' };
+            if (typeof it.recordId === 'string' && it.recordId.length <= MAX_ID_LENGTH) o.recordId = it.recordId;
+            if (isNum(it.tabId)) o.tabId = it.tabId;
+            return o;
+          })
+      : undefined;
+  const skipped = items(a.skipped, 'reason');
+  if (skipped?.length) out.skipped = skipped as NonNullable<ActionEntry['skipped']>;
+  const failed = items(a.failed, 'error');
+  if (failed?.length) out.failed = failed as NonNullable<ActionEntry['failed']>;
+  return out;
 }
 
 /** Throws (Spanish) on an unknown format / schema; rejects malformed records individually. */
@@ -195,14 +273,18 @@ export function parseAndValidateImport(data: unknown): ParsedImport {
   if (isObj(d.settings)) out.settings = sanitizeSettings(d.settings);
   if (Array.isArray(d.actions)) {
     for (const a of d.actions) {
-      if (isObj(a) && typeof a.id === 'string' && isNum(a.at) && typeof a.kind === 'string' && Array.isArray(a.recordIds)) {
-        out.actions.push({ ...(a as unknown as ActionEntry), undoable: false });
-      }
+      const clean = validateAction(a);
+      if (clean) out.actions.push(clean);
     }
   }
   if (isNum(d.exportedAt)) out.exportedAt = d.exportedAt;
   if (typeof d.appVersion === 'string') out.appVersion = d.appVersion;
   return out;
+}
+
+/** previousUrls with `url` prepended (deduplicated, without `current`, capped). */
+function withPreviousUrl(list: readonly string[], url: string, current: string): string[] {
+  return [url, ...list.filter((u) => u !== url)].filter((u) => u !== current).slice(0, MAX_PREVIOUS_URLS);
 }
 
 /**
@@ -225,15 +307,30 @@ export async function importJson(data: unknown): Promise<ImportJsonResult> {
         imp.lastReason = 'Importada desde una copia de seguridad (estaba abierta)';
       }
       const ex = existing.get(imp.id);
+      if (imp.state === 'trash') {
+        // Retention counts from the import (a backup must not trigger an immediate purge),
+        // unless the record was already in this database's trash.
+        imp.trashedAt = ex?.state === 'trash' && ex.trashedAt !== undefined ? ex.trashedAt : now;
+      }
       if (!ex) {
         toWrite.push(imp);
         result.added++;
       } else if (imp.updatedAt > ex.updatedAt) {
         if (ex.state === 'open' || ex.pendingClose) {
+          // What the browser owns wins: the tab's URL, state, binding and close marker.
+          if (imp.url !== ex.url) imp.previousUrls = withPreviousUrl(imp.previousUrls, imp.url, ex.url);
+          imp.url = ex.url;
+          imp.domain = ex.domain;
           imp.state = ex.state;
           imp.live = ex.live;
           imp.pendingClose = ex.pendingClose;
           if (ex.archivedAt === undefined) delete imp.archivedAt;
+          else imp.archivedAt = ex.archivedAt;
+          if (ex.trashedAt === undefined) delete imp.trashedAt;
+          else imp.trashedAt = ex.trashedAt;
+        } else if (imp.url !== ex.url) {
+          // The backup's URL wins; the one in this database is kept in the history.
+          imp.previousUrls = withPreviousUrl(imp.previousUrls, ex.url, imp.url);
         }
         imp.rev = Math.max(imp.rev, ex.rev);
         toWrite.push(imp);
@@ -248,6 +345,15 @@ export async function importJson(data: unknown): Promise<ImportJsonResult> {
     const current = await getSettings();
     if (parsed.settings && !current.onboardingDone) {
       await putSettings({ ...parsed.settings, automationEnabled: false, onboardingDone: current.onboardingDone });
+      const s = parsed.settings;
+      newActions.push(
+        newAction('settings', {
+          reason:
+            `Configuración restaurada desde la copia JSON: objetivo ${s.targetOpenTabs} pestañas, ` +
+            `inactividad ${s.idleArchiveHours} h, ${s.urlRules.length} reglas de URL, ${s.siteExclusions.length} sitios excluidos, ` +
+            `papelera ${s.trashRetentionDays > 0 ? `${s.trashRetentionDays} días` : 'sin eliminación automática'}; automatización desactivada`,
+        }),
+      );
     }
     newActions.push(
       newAction('import-json', {

@@ -10,9 +10,9 @@ import { undoAction } from '../../common/results';
 import { useStore } from '../../common/store';
 import { Spinner } from '../../common/widgets';
 import { actionsVersion, recordsStore } from '../data';
+import { needsUndoConfirm, undoReopenCount } from '../safety';
 
 const PAGE = 50;
-const REOPEN_CONFIRM = 20;
 
 function nameOf(id: string | undefined, byId: Map<string, { title: string; url: string }>): string {
   if (!id) return '(sin referencia)';
@@ -21,8 +21,9 @@ function nameOf(id: string | undefined, byId: Map<string, { title: string; url: 
 }
 
 async function undo(a: ActionEntry) {
-  const reopens = a.before ? Object.values(a.before).filter((p) => p.state === 'open').length : 0;
-  if ((a.kind === 'archive' || a.kind === 'trash') && reopens > REOPEN_CONFIRM) {
+  // Any kind: undo reopens every record whose state before the action was 'open'.
+  const reopens = undoReopenCount(a);
+  if (needsUndoConfirm(a)) {
     const ok = await confirmDialog({
       title: `Deshacer reabre ${plural(reopens, 'pestaña', 'pestañas')}`,
       body: <p>Se abren de a pocas a la vez y van cargando progresivamente. ¿Continuar?</p>,
@@ -30,7 +31,7 @@ async function undo(a: ActionEntry) {
     });
     if (!ok) return;
   }
-  await undoAction(a.id);
+  await undoAction(a.id, true);
 }
 
 function Entry({ a, byId }: { a: ActionEntry; byId: Map<string, { title: string; url: string }> }) {

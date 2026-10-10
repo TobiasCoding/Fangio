@@ -207,12 +207,13 @@ export function ListView() {
     archive: () => {
       const ids = selectedRecs.filter((r) => r.state !== 'archived').map((r) => r.id);
       if (!ids.length) return void toast('Ya están todas archivadas.', { kind: 'info' });
-      void run(() => closeRecords(ids, 'archive'), true);
+      // Bulk: confirm when open tabs would close; keep the selection if cancelled.
+      void closeRecords(ids, 'archive', { confirm: true }).then((r) => r && clearSelection());
     },
     trash: () => {
       const ids = selectedRecs.filter((r) => r.state !== 'trash').map((r) => r.id);
       if (!ids.length) return void toast('Ya están todas en la papelera.', { kind: 'info' });
-      void run(() => closeRecords(ids, 'trash'), true);
+      void closeRecords(ids, 'trash', { confirm: true }).then((r) => r && clearSelection());
     },
     restore: () => {
       const ids = selectedRecs.filter((r) => r.state === 'trash').map((r) => r.id);

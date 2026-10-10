@@ -7,7 +7,7 @@ import { CLOSE_BATCH_SIZE, WRITE_BATCH_SIZE } from '../shared/constants';
 import type { BulkResult } from '../shared/messages';
 import type { ActionEntry, OpJournal, RecordPatch, TabRecord } from '../shared/types';
 import { getRecordsByIds, getRecordsByState, getSettings, putAction, putOp, putRecords, testHooks } from './db';
-import { dbLock } from './mutex';
+import { dbLock, Mutex } from './mutex';
 import { applyTabData, errorText, idleMinutesOf, isBoundIn, maxDefined, newAction, originOf, stateSnapshot, windowOrdinals } from './records';
 import { blockReasons, describeBlocks, type RuleMode } from './rules';
 import { broadcast, markBusy, recordsChanged, rt, unmarkBusy } from './runtime';
@@ -21,12 +21,20 @@ export interface CloseItem {
   reason?: string;
   /** Auto mode: the tab must still be idle at least this long right before closing. */
   minIdleMinutes?: number;
+  /**
+   * URL the decision was made for (automation). If the tab shows a different URL
+   * when it is classified, saved or revalidated, the item is skipped.
+   */
+  expectedUrl?: string;
 }
 
 export interface CloseOptions {
   items: CloseItem[];
   targetState: 'archived' | 'trash';
-  /** auto = every protection applies; manual/import = only protected (unless force) and unsafe pages. */
+  /**
+   * auto / import = every protection applies (protected, pinned, active, audible, excluded site, ...);
+   * manual = only protected (unless force) and unsafe pages.
+   */
   mode: RuleMode;
   force?: boolean;
   reason: string;
@@ -36,6 +44,16 @@ export interface CloseOptions {
 }
 
 export const STATE_LABEL = { archived: 'archivada', trash: 'en la papelera', open: 'abierta' } as const;
+
+const URL_CHANGED_SINCE_EVAL = 'La URL cambió desde que se evaluó la regla';
+export const URL_CHANGED_BEFORE_CLOSE = 'La URL cambió antes de cerrar';
+
+/**
+ * Serializes "query tabs -> zero-tabs guard -> tabs.remove" across concurrent
+ * close operations, so two ops can never each believe the other's tabs keep
+ * the browser alive. Separate from dbLock (no IndexedDB work happens inside).
+ */
+const closeLock = new Mutex();
 
 async function checkpoint(name: string): Promise<void> {
   const h = testHooks.checkpoint;
@@ -55,6 +73,8 @@ interface Candidate {
   item: CloseItem;
   tabId: number;
   before: RecordPatch;
+  /** URL confirmed by revalidation (= pendingClose.expectedUrl); re-checked per close batch. */
+  url?: string;
 }
 
 /** Modifies a record to its final closed state. */
@@ -93,7 +113,9 @@ export async function runCloseOp(opts: CloseOptions): Promise<BulkResult> {
   const kind = target === 'archived' ? 'archive' : 'trash';
   const opId = crypto.randomUUID();
   const actionId = crypto.randomUUID();
-  const blockMode: RuleMode = opts.mode === 'auto' ? 'auto' : 'manual';
+  // 'import' keeps full protections (same as 'auto'): the wizard never closes
+  // active / pinned / audible / site-excluded tabs. Revalidation uses the same mode.
+  const blockMode: RuleMode = opts.mode === 'auto' ? 'auto' : opts.mode === 'import' ? 'import' : 'manual';
   const reasonOf = (it: CloseItem) => it.reason ?? opts.reason;
 
   const candidates: Candidate[] = [];
@@ -141,6 +163,10 @@ export async function runCloseOp(opts: CloseOptions): Promise<BulkResult> {
         }
         if (opts.mode === 'auto' && item.minIdleMinutes !== undefined && idleMinutesOf(rec, tab, now) < item.minIdleMinutes) {
           result.skipped.push({ recordId: rec.id, tabId: tab.id!, reason: 'Se consultó recientemente' });
+          continue;
+        }
+        if (item.expectedUrl !== undefined && tabUrl(tab) !== item.expectedUrl) {
+          result.skipped.push({ recordId: rec.id, tabId: tab.id!, reason: URL_CHANGED_SINCE_EVAL });
           continue;
         }
         candidates.push({ item, tabId: tab.id!, before });
@@ -216,13 +242,27 @@ export async function runCloseOp(opts: CloseOptions): Promise<BulkResult> {
       }
       await checkpoint('close:afterSave');
       // ---- Phase 3: revalidate right before closing
-      const toClose = await revalidate(op, saved, settings, blockMode, extId, result);
+      let toClose = await revalidate(op, saved, settings, blockMode, extId, result);
       // Items that will not be closed are released right away (the tracker may handle them again).
       const closing = new Set(toClose.map((c) => c.item.recordId));
       for (const c of candidates) if (!closing.has(c.item.recordId)) release(c.item.recordId);
-      // ---- Phase 4: close in batches
-      const { closed, gone, failed } = await closeTabs(toClose.map((c) => c.tabId));
+      await checkpoint('close:beforeRemove');
+      // ---- Phase 4: close in batches (each batch re-checks the URL of every tab)
+      const expected = new Map<number, string>();
+      for (const c of toClose) if (c.url !== undefined) expected.set(c.tabId, c.url);
+      const { closed, gone, failed, changed } = await closeTabs(toClose.map((c) => c.tabId), expected);
       for (const id of [...closed, ...gone]) closedTabIds.push(id);
+      if (changed.length > 0) {
+        const changedSet = new Set(changed);
+        const changedItems = toClose.filter((c) => changedSet.has(c.tabId));
+        for (const c of changedItems) {
+          result.skipped.push({ recordId: c.item.recordId, tabId: c.tabId, reason: URL_CHANGED_BEFORE_CLOSE });
+          setItem(op, c.item.recordId, 'skipped');
+        }
+        await clearPending(opId, changedItems.map((c) => c.item.recordId));
+        for (const c of changedItems) release(c.item.recordId);
+        toClose = toClose.filter((c) => !changedSet.has(c.tabId));
+      }
       const failedIds = toClose.filter((c) => failed.has(c.tabId));
       for (const c of failedIds) result.failed.push({ recordId: c.item.recordId, tabId: c.tabId, error: failed.get(c.tabId)! });
       await clearPending(opId, failedIds.map((c) => c.item.recordId));
@@ -234,6 +274,9 @@ export async function runCloseOp(opts: CloseOptions): Promise<BulkResult> {
     // ---- Phase 5: final state + action log
     await finalize(opts, op, saved, inPlace, reasonOf, result, actionId, kind);
   } finally {
+    // Forced closes unprotected the records up front: any that did not end up
+    // closed (skipped / failed) gets its protection back.
+    if (unprotected.length > 0) await reprotect(opId, unprotected, new Set(result.done));
     unmarkBusy([...held]);
     held.clear();
     rt.runningOpIds.delete(opId);
@@ -243,6 +286,33 @@ export async function runCloseOp(opts: CloseOptions): Promise<BulkResult> {
     }, 10000);
   }
   return finalizeResult(result, items.length);
+}
+
+/** Restores protected=true on forced records that were not closed by this op. */
+async function reprotect(opId: string, ids: string[], done: ReadonlySet<string>): Promise<void> {
+  const pendingIds = ids.filter((id) => !done.has(id));
+  if (pendingIds.length === 0) return;
+  try {
+    await dbLock.run(async () => {
+      const recs = await getRecordsByIds(pendingIds);
+      // A record still carrying THIS op's pendingClose had its tab closed: resume completes it.
+      const list = [...recs.values()].filter((r) => !r.protected && r.pendingClose?.opId !== opId);
+      if (list.length === 0) return;
+      for (const r of list) r.protected = true;
+      await putRecords(list);
+      await putAction(
+        newAction('update', {
+          reason: 'Protección restaurada: la acción forzada no llegó a cerrarla',
+          recordIds: list.map((r) => r.id),
+          before: Object.fromEntries(list.map((r) => [r.id, { protected: false }])),
+          undoable: true,
+        }),
+      );
+    });
+    recordsChanged(pendingIds);
+  } catch (e) {
+    console.error('[fangio] could not restore protection', e);
+  }
 }
 
 function setItem(op: OpJournal, recordId: string, status: OpJournal['items'][number]['status'], error?: string): void {
@@ -282,6 +352,11 @@ async function saveWithPendingClose(
         const url = tabUrl(tab);
         if (!isTrackableUrl(url)) {
           result.skipped.push({ recordId: rec.id, tabId: c.tabId, reason: 'La pestaña muestra una URL no rastreable' });
+          setItem(op, rec.id, 'skipped');
+          continue;
+        }
+        if (c.item.expectedUrl !== undefined && url !== c.item.expectedUrl) {
+          result.skipped.push({ recordId: rec.id, tabId: c.tabId, reason: URL_CHANGED_SINCE_EVAL });
           setItem(op, rec.id, 'skipped');
           continue;
         }
@@ -351,6 +426,10 @@ async function revalidate(
       skip(c, 'La pestaña cambió de URL antes de cerrarse');
       continue;
     }
+    if (c.item.expectedUrl !== undefined && tabUrl(tab) !== c.item.expectedUrl) {
+      skip(c, URL_CHANGED_SINCE_EVAL);
+      continue;
+    }
     const blocks = blockReasons(tab, rec, settings, now, mode, { extensionId: extId, ignoreOpId: op.id });
     if (blocks.length > 0) {
       skip(c, `No se cierra: ${describeBlocks(blocks)}`);
@@ -360,31 +439,67 @@ async function revalidate(
       skip(c, 'Se consultó recientemente');
       continue;
     }
-    ok.push(c);
+    ok.push({ ...c, url: pc.expectedUrl });
   }
   await clearPending(op.id, clear);
   return ok;
 }
 
-/** chrome.tabs.remove in batches; never leaves the browser without a normal-window tab. */
-export async function closeTabs(ids: number[]): Promise<{ closed: number[]; gone: number[]; failed: Map<number, string> }> {
+/**
+ * chrome.tabs.remove in batches; never leaves the browser without a normal-window tab.
+ * With `expectedUrls`, a tab whose current URL differs from its expected URL at the
+ * moment its batch is closed is NOT removed and is reported in `changed`.
+ * Each batch (query + guard + remove) runs under a module-level lock so concurrent
+ * close operations cannot jointly empty the browser.
+ */
+export async function closeTabs(
+  ids: number[],
+  expectedUrls?: ReadonlyMap<number, string>,
+): Promise<{ closed: number[]; gone: number[]; failed: Map<number, string>; changed: number[] }> {
   const closed: number[] = [];
   const gone: number[] = [];
+  const changed: number[] = [];
   const failed = new Map<number, string>();
   for (let i = 0; i < ids.length; i += CLOSE_BATCH_SIZE) {
     const batch = ids.slice(i, i + CLOSE_BATCH_SIZE);
+    await closeLock.run(() => closeBatch(batch, expectedUrls, closed, gone, failed, changed));
+  }
+  return { closed, gone, failed, changed };
+}
+
+async function closeBatch(
+  batch: number[],
+  expectedUrls: ReadonlyMap<number, string> | undefined,
+  closed: number[],
+  gone: number[],
+  failed: Map<number, string>,
+  changed: number[],
+): Promise<void> {
+  {
     const [all, normal] = await Promise.all([chrome.tabs.query({}), chrome.tabs.query({ windowType: 'normal' })]);
-    const present = new Set(all.map((t) => t.id));
-    const existing = batch.filter((id) => present.has(id));
-    for (const id of batch) if (!present.has(id)) gone.push(id);
-    if (existing.length === 0) continue;
+    const byId = new Map(all.map((t) => [t.id, t]));
+    const existing: number[] = [];
+    for (const id of batch) {
+      const t = byId.get(id);
+      if (!t) {
+        gone.push(id);
+        continue;
+      }
+      const exp = expectedUrls?.get(id);
+      if (exp !== undefined && tabUrl(t) !== exp) {
+        changed.push(id);
+        continue;
+      }
+      existing.push(id);
+    }
+    if (existing.length === 0) return;
     const set = new Set(existing);
     if (normal.length > 0 && normal.every((t) => set.has(t.id!))) {
       try {
         await chrome.tabs.create({ windowId: normal[0]!.windowId, active: true });
       } catch (e) {
         for (const id of existing) failed.set(id, `No se puede dejar el navegador sin pestañas: ${errorText(e)}`);
-        continue;
+        return;
       }
     }
     for (const id of existing) rt.closingTabIds.add(id);
@@ -417,7 +532,6 @@ export async function closeTabs(ids: number[]): Promise<{ closed: number[]; gone
       }
     }
   }
-  return { closed, gone, failed };
 }
 
 async function finalize(

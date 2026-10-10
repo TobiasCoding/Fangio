@@ -214,16 +214,38 @@ export async function emptyTrash(confirm: unknown): Promise<BulkResult> {
   return purgeRecords(ids, confirm, { reason: `Papelera vaciada: ${ids.length} referencias eliminadas definitivamente` });
 }
 
-/** Maintenance: purge trash older than trashRetentionDays (0 = never). */
+/** Safety cap: permanent deletions per maintenance run (the rest waits for the next run). */
+export const MAX_PURGE_PER_RUN = 500;
+/** Tolerance before a trashedAt in the future is taken as "the clock went backwards". */
+const CLOCK_SKEW_TOLERANCE_MS = 5 * 60 * 1000;
+
+/**
+ * Maintenance: purge trash older than trashRetentionDays (0 = never).
+ * Guards against clock jumps: if any trash record was trashed "in the future"
+ * (the clock went backwards) nothing is purged this run; and never more than
+ * MAX_PURGE_PER_RUN records (oldest first) are deleted per run.
+ */
 export async function purgeExpired(now = Date.now()): Promise<number> {
   const s = await getSettings();
   if (s.trashRetentionDays <= 0) return 0;
+  const trash = await getRecordsByState('trash');
+  const stamp = (x: TabRecord) => x.trashedAt ?? x.updatedAt;
+  let maxSeen = -Infinity;
+  for (const x of trash) maxSeen = Math.max(maxSeen, stamp(x));
+  if (maxSeen > now + CLOCK_SKEW_TOLERANCE_MS) {
+    console.warn('[fangio] purge skipped: the system clock seems to have gone backwards');
+    return 0;
+  }
   const cutoff = now - s.trashRetentionDays * DAY;
-  const old = (await getRecordsByState('trash')).filter((x) => (x.trashedAt ?? x.updatedAt) < cutoff).map((x) => x.id);
-  if (old.length === 0) return 0;
+  const expired = trash.filter((x) => stamp(x) < cutoff).sort((a, b) => stamp(a) - stamp(b));
+  if (expired.length === 0) return 0;
+  const old = expired.slice(0, MAX_PURGE_PER_RUN).map((x) => x.id);
+  const capped = expired.length > old.length;
   const res = await purgeRecords(old, PURGE_CONFIRM, {
     auto: true,
-    reason: `Eliminación automática: más de ${s.trashRetentionDays} días en la papelera (${old.length} referencias)`,
+    reason:
+      `Eliminación automática: más de ${s.trashRetentionDays} días en la papelera (${old.length} referencias)` +
+      (capped ? `; tope de ${MAX_PURGE_PER_RUN} por ejecución, quedan ${expired.length - old.length} para la próxima` : ''),
   });
   return res.done.length;
 }

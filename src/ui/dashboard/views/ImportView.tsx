@@ -10,6 +10,8 @@ import { showBulkDetail, undoAction } from '../../common/results';
 import { useStore } from '../../common/store';
 import { Favicon, Spinner } from '../../common/widgets';
 import { refreshSettings, settingsStore, titleOf } from '../data';
+import { confirmEnableAutomation } from '../ops';
+import { buildImportLists, initialImportChoice, invertImportChoices, isImportBlocked, setImportChoices } from '../safety';
 import { VirtualList } from '../VirtualList';
 import { ExportJsonButton } from './BackupView';
 import { PreviewTable } from './PreviewTable';
@@ -41,7 +43,7 @@ export function ImportView() {
     const ch: Record<string, DecisionAction> = {};
     const pr = new Set<string>();
     for (const c of list) {
-      ch[c.recordId] = c.protected ? 'keep' : c.suggested;
+      ch[c.recordId] = initialImportChoice(c);
       if (c.protected) pr.add(c.recordId);
     }
     setChoice(ch);
@@ -88,18 +90,18 @@ export function ImportView() {
     return out;
   }, [cands, q]);
 
+  // Rows blocked by protections (active, pinned, audio, excluded site, ...) are locked to "keep".
+  const blockedIds = useMemo(() => new Set(cands.filter(isImportBlocked).map((c) => c.recordId)), [cands]);
+  const locked = (id: string) => protect.has(id) || blockedIds.has(id);
+
   const counts = useMemo(() => {
     const n = { archive: 0, trash: 0, keep: 0 };
-    for (const c of cands) n[protect.has(c.recordId) ? 'keep' : (choice[c.recordId] ?? 'keep')]++;
+    for (const c of cands) n[protect.has(c.recordId) || blockedIds.has(c.recordId) ? 'keep' : (choice[c.recordId] ?? 'keep')]++;
     return n;
-  }, [cands, choice, protect]);
+  }, [cands, choice, protect, blockedIds]);
 
   const setMany = (ids: string[], action: DecisionAction) => {
-    setChoice((prev) => {
-      const next = { ...prev };
-      for (const id of ids) if (!protect.has(id)) next[id] = action;
-      return next;
-    });
+    setChoice((prev) => setImportChoices(prev, ids, action, locked));
   };
 
   const toggleProtect = (id: string, on: boolean) => {
@@ -113,30 +115,20 @@ export function ImportView() {
   };
 
   const invert = () => {
-    setChoice((prev) => {
-      const next = { ...prev };
-      for (const c of cands) {
-        if (protect.has(c.recordId)) continue;
-        const a = next[c.recordId];
-        if (a === 'archive') next[c.recordId] = 'keep';
-        else if (a === 'keep') next[c.recordId] = 'archive';
-      }
-      return next;
-    });
+    setChoice((prev) =>
+      invertImportChoices(
+        prev,
+        cands.map((c) => c.recordId),
+        locked,
+      ),
+    );
   };
 
   const idsOfDomain = (d: string) => cands.filter((c) => c.domain === d).map((c) => c.recordId);
 
   const apply = async () => {
-    const archiveIds: string[] = [];
-    const trashIds: string[] = [];
-    for (const c of cands) {
-      if (protect.has(c.recordId)) continue;
-      const a = choice[c.recordId];
-      if (a === 'archive') archiveIds.push(c.recordId);
-      else if (a === 'trash') trashIds.push(c.recordId);
-    }
-    const protectIds = [...protect];
+    // Blocked rows are never sent to archive/trash (the background re-checks anyway).
+    const { archiveIds, trashIds, protectIds, blocked } = buildImportLists(cands, choice, protect);
     const ok = await confirmDialog({
       title: 'Aplicar la importación',
       body: (
@@ -146,6 +138,12 @@ export function ImportView() {
             y quedarán abiertas <strong>{fmtNum(counts.keep)}</strong>
             {protectIds.length ? ` (${fmtNum(protectIds.length)} protegidas)` : ''}.
           </p>
+          {blocked > 0 && (
+            <p class="muted">
+              {plural(blocked, 'pestaña queda abierta', 'pestañas quedan abiertas')} por estar activas, fijadas, con audio, protegidas o
+              en sitios excluidos.
+            </p>
+          )}
           <p class="muted">Cada referencia se guarda y se verifica antes de cerrar su pestaña. Podés deshacerlo desde Registro.</p>
         </>
       ),
@@ -180,6 +178,10 @@ export function ImportView() {
   const enableAutomation = async () => {
     setEnabling(true);
     try {
+      // Fresh preview + explicit confirmation with the counts of what would close right now.
+      const fresh = await confirmEnableAutomation();
+      if (!fresh) return;
+      setPreview(fresh);
       const s = await send({ type: 'getSettings' });
       const saved = await send({ type: 'saveSettings', settings: { ...s, automationEnabled: true } });
       settingsStore.set(saved);
@@ -296,13 +298,18 @@ export function ImportView() {
     }
     const c = row.c;
     const prot = protect.has(c.recordId);
-    const action = prot ? 'keep' : (choice[c.recordId] ?? 'keep');
+    const blocked = blockedIds.has(c.recordId);
+    const action = prot || blocked ? 'keep' : (choice[c.recordId] ?? 'keep');
+    const blockedTip = blocked
+      ? `Bloqueada: ${c.blockedBy.map((b) => blockLabel(b)).join(', ')}. Podés archivarla después desde la lista.`
+      : undefined;
     return (
       <div class={`irow itab act-${action}`}>
         <select
           class="iaction"
           value={action}
-          disabled={prot}
+          disabled={prot || blocked}
+          title={blockedTip}
           aria-label={`Acción para ${c.title || c.url}`}
           onChange={(e) => setMany([c.recordId], e.currentTarget.value as DecisionAction)}
         >
@@ -359,6 +366,10 @@ export function ImportView() {
           <ul class="muted">
             <li>Fangio lee título y URL sin cargar ni recargar las páginas.</li>
             <li>Cada referencia se guarda y se verifica antes de cerrar su pestaña.</li>
+            <li>
+              Las pestañas activas, fijadas, con audio, protegidas o de sitios excluidos quedan abiertas; podés archivarlas después
+              desde la lista.
+            </li>
             <li>Todo se puede reabrir o deshacer desde Registro.</li>
           </ul>
         </div>
