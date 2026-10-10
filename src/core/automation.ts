@@ -68,10 +68,17 @@ export async function runAutomation(trigger: 'alarm' | 'manual'): Promise<BulkRe
     const res: BulkResult = { ok: true, done: [], skipped: [], failed: [] };
     let archived = 0;
     let trashed = 0;
+    let stopped = false;
     for (const ds of groups.values()) {
       const first = ds[0]!;
+      // The user may switch automation off while a long alarm run is in progress.
+      if (trigger === 'alarm' && !(await getSettings()).automationEnabled) {
+        stopped = true;
+        break;
+      }
       const r = await runCloseOp({
-        items: ds.map((d) => ({ recordId: d.recordId, reason: d.reason, minIdleMinutes: requiredIdleFor(d, settings) })),
+        // expectedUrl ties each decision to the URL it was evaluated for.
+        items: ds.map((d) => ({ recordId: d.recordId, reason: d.reason, minIdleMinutes: requiredIdleFor(d, settings), expectedUrl: d.url })),
         targetState: first.action === 'trash' ? 'trash' : 'archived',
         mode: 'auto',
         reason: groupReason(ds, settings),
@@ -92,7 +99,8 @@ export async function runAutomation(trigger: 'alarm' | 'manual'): Promise<BulkRe
         : `${closed} cerradas (${archived} archivadas, ${trashed} a la papelera)` +
           (res.skipped.length ? `, ${res.skipped.length} omitidas` : '') +
           (res.failed.length ? `, ${res.failed.length} con error` : '') +
-          (preview.capped ? `; tope de ${settings.maxAutoClosePerRun} por ejecución alcanzado` : '');
+          (preview.capped ? `; tope de ${settings.maxAutoClosePerRun} por ejecución alcanzado` : '') +
+          (stopped ? '; detenida: la automatización se desactivó durante la ejecución' : '');
     const last: LastAutoRun = { at: Date.now(), trigger, summary, closed, skipped: res.skipped.length, failed: res.failed.length };
     await setKv('lastAutoRun', last);
     broadcast({ type: 'status' });

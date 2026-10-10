@@ -12,6 +12,8 @@ import { reportBulk } from '../../common/results';
 import { useStore } from '../../common/store';
 import { Spinner, Switch } from '../../common/widgets';
 import { settingsStore, titleOf } from '../data';
+import { confirmEnableAutomation } from '../ops';
+import { resolveAutomationEnabled } from '../safety';
 import { previewCounts, PreviewTable } from './PreviewTable';
 
 const HOST_RE = /^(\*\.)?[a-z0-9-]+(\.[a-z0-9-]+)*(:\d+)?$/i;
@@ -83,6 +85,20 @@ export function RulesView() {
   }, []);
 
   const exclLines = useMemo(() => splitLines(exclText), [exclText]);
+
+  // Settings changed elsewhere (popup, import wizard, another dashboard tab):
+  // resync a clean form; on a dirty form only follow automationEnabled if the
+  // user did not toggle it in this draft.
+  useEffect(() => {
+    if (!stored || !draft || !saved) return;
+    const isDirty = JSON.stringify({ ...draft, siteExclusions: exclLines }) !== JSON.stringify(saved);
+    if (!isDirty) {
+      if (JSON.stringify(stored) !== JSON.stringify(saved)) adopt(stored);
+    } else if (draft.automationEnabled === saved.automationEnabled && stored.automationEnabled !== saved.automationEnabled) {
+      setSaved({ ...saved, automationEnabled: stored.automationEnabled });
+      setDraft({ ...draft, automationEnabled: stored.automationEnabled });
+    }
+  }, [stored]);
   const badExcl = exclLines.filter((l) => !HOST_RE.test(l) && !/^[a-z]+:\/\/[^/]+/i.test(l));
   const ruleErrors = useMemo(() => {
     const m = new Map<string, string>();
@@ -108,18 +124,35 @@ export function RulesView() {
     }
     setSaving(true);
     try {
-      const latest = settingsStore.get();
+      // Latest STORED settings (the store / draft may be stale).
+      const latest: Settings | null = await send({ type: 'getSettings' }).catch(() => settingsStore.get());
+      // automationEnabled: the draft's value only if the user toggled it here; otherwise keep what is stored.
+      const wantAuto = resolveAutomationEnabled(draft.automationEnabled, saved.automationEnabled, latest?.automationEnabled ?? saved.automationEnabled);
+      const enabling = wantAuto && !(latest?.automationEnabled ?? saved.automationEnabled);
       const next = sanitizeSettings({
         ...draft,
         siteExclusions: exclLines,
         urlRules: draft.urlRules.map((r) => ({ ...r, url: r.url.trim() })),
+        // Turning it on is confirmed below, after the rest is saved (the preview must use the new rules).
+        automationEnabled: enabling ? false : wantAuto,
         // never clobber fields managed elsewhere
         onboardingDone: !!(latest?.onboardingDone || draft.onboardingDone),
         ...(latest?.lastBackupAt !== undefined || draft.lastBackupAt !== undefined
           ? { lastBackupAt: Math.max(latest?.lastBackupAt ?? 0, draft.lastBackupAt ?? 0) }
           : {}),
       });
-      const res = await send({ type: 'saveSettings', settings: next });
+      let res = await send({ type: 'saveSettings', settings: next });
+      if (enabling) {
+        settingsStore.set(res);
+        const confirmed = await confirmEnableAutomation();
+        if (confirmed) {
+          const cur = await send({ type: 'getSettings' });
+          res = await send({ type: 'saveSettings', settings: { ...cur, automationEnabled: true } });
+          setPreview(confirmed);
+        } else {
+          toast('Los cambios se guardaron; la automatización sigue desactivada.', { kind: 'info' });
+        }
+      }
       adopt(res);
       settingsStore.set(res);
       toast('Configuración guardada');

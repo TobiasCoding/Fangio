@@ -1,6 +1,8 @@
 // Turns a BulkResult into a toast with "ver detalle" / "Deshacer" / force actions.
 
 import type { BulkResult } from '../../shared/messages';
+import { getAction } from '../../core/db';
+import { needsUndoConfirm, undoReopenCount } from '../dashboard/safety';
 import { errMsg, send } from './api';
 import { confirmDialog, infoDialog, toast } from './feedback';
 import type { ToastAction } from './feedback';
@@ -60,7 +62,28 @@ export function showBulkDetail(res: BulkResult, titleOf?: (id: string) => string
   );
 }
 
-export async function undoAction(actionId: string): Promise<void> {
+/**
+ * Undo an action. Unless the caller already asked, an undo that would reopen more
+ * than 20 tabs (any action kind) asks for confirmation first.
+ */
+export async function undoAction(actionId: string, alreadyConfirmed = false): Promise<void> {
+  if (!alreadyConfirmed) {
+    let entry;
+    try {
+      entry = await getAction(actionId);
+    } catch {
+      entry = undefined;
+    }
+    if (entry && needsUndoConfirm(entry)) {
+      const n = undoReopenCount(entry);
+      const ok = await confirmDialog({
+        title: `Deshacer reabre ${plural(n, 'pestaña', 'pestañas')}`,
+        body: <p>Se abren de a pocas a la vez y van cargando progresivamente. ¿Continuar?</p>,
+        confirmLabel: 'Deshacer',
+      });
+      if (!ok) return;
+    }
+  }
   try {
     const r = await send({ type: 'undo', actionId });
     // No "Deshacer" link on the result of an undo (it can be undone from Registro if needed).

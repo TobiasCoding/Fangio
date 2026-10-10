@@ -73,8 +73,11 @@ function start(): Promise<void> {
 }
 /** Idempotent: resolves once init succeeded; retries init if it had failed. */
 export function ready(): Promise<void> {
-  return readyP.catch(() => {
-    readyP = start();
+  // Single-flight retry: concurrent callers that observed the same rejected
+  // init share ONE new start() instead of each launching their own.
+  const failed = readyP;
+  return failed.catch(() => {
+    if (readyP === failed) readyP = start();
     return readyP;
   });
 }

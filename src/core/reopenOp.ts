@@ -22,6 +22,7 @@ import {
 } from './runtime';
 import { getSession } from './session';
 import { queryAllTabs } from './tracker';
+import { isTrackableUrl } from './url';
 
 export interface ReopenOptions {
   recordIds: string[];
@@ -233,6 +234,14 @@ export async function executeReopenOp(
   let first = true;
 
   const processOne = async (item: OpJournal['items'][number], rec: TabRecord, isFirst: boolean) => {
+    // Never open javascript:, data:, chrome:// ... (e.g. from a tampered backup). The record stays as is.
+    if (!isTrackableUrl(rec.url)) {
+      item.status = 'failed';
+      item.error = 'No se reabre: la URL no es http, https, file ni ftp';
+      result.failed.push({ recordId: rec.id, error: item.error });
+      await persist();
+      return;
+    }
     item.status = 'creating';
     await persist();
     await checkpoint('reopen:afterCreating');

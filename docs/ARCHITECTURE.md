@@ -81,10 +81,18 @@ asumen iguales en estado (ver Duplicados).
    falla, el ítem queda `failed` y **la pestaña no se toca**.
 3. **Revalidar** inmediatamente antes de cerrar: `chrome.tabs.get(tabId)` debe existir, la
    URL debe ser idéntica a `expectedUrl`, y la pestaña debe seguir siendo elegible (para
-   acciones automáticas: no activa, no fijada, sin audio, no protegida, etc.; para acciones
-   manuales: no protegida salvo `force`). Además se relee el registro: debe conservar el
+   acciones automáticas y la importación inicial: no activa, no fijada, sin audio, sitio no
+   excluido, no protegida, etc.; para acciones manuales: no protegida salvo `force`). Las
+   decisiones automáticas llevan la URL evaluada (`CloseItem.expectedUrl`): si la pestaña ya
+   muestra otra, se omite. Además se relee el registro: debe conservar el
    mismo `pendingClose.opId`. Si algo cambió → `skipped` y se limpia `pendingClose`.
-4. **Cerrar** con `chrome.tabs.remove` en lotes de `CLOSE_BATCH_SIZE`. Si el lote falla, se
+   Una acción forzada sobre un registro protegido que termina omitida o con error le
+   devuelve la protección.
+4. **Cerrar** con `chrome.tabs.remove` en lotes de `CLOSE_BATCH_SIZE`. Cada lote vuelve a
+   consultar las pestañas y descarta las que ya no muestran la URL esperada («La URL cambió
+   antes de cerrar»: quedan abiertas y se limpia `pendingClose`). Consulta + resguardo +
+   `remove` de cada lote corren bajo un mutex global, así dos operaciones concurrentes no
+   pueden dejar juntas al navegador vacío. Si el lote falla, se
    reintenta de a una para aislar el error. Si cerrar dejaría al navegador sin ninguna
    pestaña normal, primero se crea una pestaña nueva vacía.
 5. **Registrar resultado**: `state = targetState`, `archivedAt`/`trashedAt`, `live = null`,
@@ -182,6 +190,8 @@ fusionarse en otro (se rechaza: hay que archivarlo antes).
 Política explícita y separada del archivado: `trashRetentionDays` (30 por defecto; 0 =
 nunca). La alarma de mantenimiento elimina sólo registros en `trash` con
 `trashedAt < now - retención`, y deja una entrada `purge` en el registro (no deshacible).
+Como resguardo ante saltos de reloj, no elimina nada si algún `trashedAt` está en el futuro
+(el reloj retrocedió) y nunca más de 500 por ejecución (las más antiguas primero).
 «Vaciar papelera» y «Eliminar definitivamente» requieren `confirm: 'ELIMINAR'`.
 
 ## Registro de acciones y deshacer
@@ -205,9 +215,13 @@ se hacen en `onupgradeneeded` sin pérdida de datos.
 ## Exportación / importación
 
 JSON versionado `ExportFileV1` (`format: 'fangio-export'`, `schemaVersion: 1`). Al importar
-se valida cada registro; los registros importados en estado `open` pasan a `archived`
-(no tienen pestaña); fusión por `id` (gana `updatedAt` mayor); nunca se borra nada al
-importar. También se exporta HTML en formato de marcadores Netscape (importable en
+se valida cada registro (sólo URLs http/https/file/ftp, largos acotados; las entradas del
+registro de acciones se filtran por campos y nunca son deshacibles); los registros
+importados en estado `open` pasan a `archived` (no tienen pestaña) y los de `trash` reciben
+`trashedAt = ahora` (la retención cuenta desde la importación); fusión por `id` (gana
+`updatedAt` mayor, pero un registro abierto o con cierre en curso conserva URL, estado y
+vínculo; la URL que pierde pasa a `previousUrls`); nunca se borra nada al importar. Reabrir
+rechaza URLs no rastreables. También se exporta HTML en formato de marcadores Netscape (importable en
 cualquier navegador) como vía de recuperación independiente de la extensión.
 
 ## Interfaz

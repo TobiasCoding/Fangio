@@ -3,7 +3,8 @@ import { buildBookmarksHtml, buildExport, parseAndValidateImport } from '../src/
 import type { ExportFileV1, TabRecord } from '../src/shared/types';
 import { freshBrowser, idle, startWorker } from './helpers/env';
 
-const STRIP = ['state', 'archivedAt', 'lastReason', 'rev', 'live', 'pendingClose', 'updatedAt'] as const;
+// trashedAt is reset to the import time on import (retention counts from the import).
+const STRIP = ['state', 'archivedAt', 'trashedAt', 'lastReason', 'rev', 'live', 'pendingClose', 'updatedAt'] as const;
 function comparable(r: TabRecord) {
   const c: Record<string, unknown> = { ...r };
   for (const k of STRIP) delete c[k];
