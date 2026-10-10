@@ -5,9 +5,11 @@
 //   2. record with pendingClose for the same URL (interrupted close; tab survived)
 //   3. open record without a valid binding and the same exact URL (nearest origin)
 //   4. record implicitly closed within REBIND_WINDOW_MS with the same URL (Ctrl+Shift+T)
+//   4b. during the startup grace only: record closed by one of our ops shortly before this
+//       session started (the browser restored a tab we had just closed: crash/kill)
 //   5. otherwise a new record
 
-import { REBIND_WINDOW_MS, STARTUP_GRACE_MS } from '../shared/constants';
+import { REBIND_WINDOW_MS, RESTORED_AFTER_CLOSE_WINDOW_MS, STARTUP_GRACE_MS } from '../shared/constants';
 import type { RecordPatch, RecordSource, TabRecord } from '../shared/types';
 import { applyTabData, newRecordFromTab, originOf, stateSnapshot, windowOrdinals, type GroupMap } from './records';
 import { isExtensionPage, isTrackableUrl, tabUrl } from './url';
@@ -223,6 +225,31 @@ export function planReconcile(input: ReconcileInput): ReconcilePlan {
     if (cands.length === 0) continue;
     cands.sort((a, b) => b.implicitCloseAt! - a.implicitCloseAt!);
     bind(cands[0]!, tab, 4);
+  }
+  // ---- rule 4b: the browser restored a tab we had closed right before it stopped (crash or
+  // kill shortly after a mass archive: the session file still had the tab). Reuse the record
+  // instead of creating a duplicate. Only inside the startup grace of a new session and only
+  // for records closed shortly BEFORE that session started (never for closes in this session).
+  if (now - input.startupAt < STARTUP_GRACE_MS) {
+    const closedAt = (r: TabRecord) => (r.state === 'archived' ? r.archivedAt : r.state === 'trash' ? r.trashedAt : undefined);
+    for (const tab of unbound) {
+      if (claimedTab.has(tab.id!)) continue;
+      const cands = (byUrl.get(tabUrl(tab)) ?? []).filter((r) => {
+        const at = closedAt(r);
+        return (
+          !r.pendingClose &&
+          eligible(r) &&
+          r.implicitCloseAt === undefined &&
+          typeof at === 'number' &&
+          at < input.startupAt &&
+          input.startupAt - at <= RESTORED_AFTER_CLOSE_WINDOW_MS
+        );
+      });
+      if (cands.length === 0) continue;
+      cands.sort((a, b) => closedAt(b)! - closedAt(a)!);
+      bind(cands[0]!, tab, 4);
+      plan.changed.get(cands[0]!.id)!.lastReason = 'El navegador restauró la pestaña tras el cierre (re-vinculada)';
+    }
   }
   // ---- rule 5: new record
   for (const tab of unbound) {

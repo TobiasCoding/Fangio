@@ -14,6 +14,12 @@ export const MAX_NOTE_LENGTH = 20000;
 
 /** Records that left 'open' implicitly can be re-bound to a reappearing identical URL within this window. */
 export const REBIND_WINDOW_MS = 30 * 60 * 1000;
+/**
+ * A record closed by one of our ops at most this long before the current browser session
+ * started may be re-bound to a tab with the same URL that appears during the startup grace:
+ * the browser restored a tab we had just closed (crash / kill right after a mass archive).
+ */
+export const RESTORED_AFTER_CLOSE_WINDOW_MS = 10 * 60 * 1000;
 /** After browser startup, unbound open records are not archived before this grace period (tabs still restoring). */
 export const STARTUP_GRACE_MS = 3 * 60 * 1000;
 /** Debounce for coalescing tab events into IndexedDB writes. */
