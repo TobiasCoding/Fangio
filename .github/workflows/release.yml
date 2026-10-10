@@ -1,0 +1,80 @@
+name: Release
+
+# Pushing a tag vX.Y.Z (created by `npm run release`) builds, verifies and publishes the
+# GitHub Release with the installable zip and its SHA-256.
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write # create the release and upload its assets
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+
+jobs:
+  release:
+    name: Publicar release
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # No dependency cache on purpose: release artifacts are built from a fresh `npm ci`.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Verificar que la etiqueta coincide con package.json
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
+            echo "::error::La etiqueta ${GITHUB_REF_NAME} no coincide con la versión de package.json (v${version})."
+            exit 1
+          fi
+          echo "VERSION=${version}" >> "$GITHUB_ENV"
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+
+      - name: Compilar y empaquetar
+        run: |
+          # Reproducible zip timestamps: the tagged commit's date.
+          export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
+          npm run package
+          test -f "release/fangio-v${VERSION}.zip"
+          test -f release/SHA256SUMS.txt
+          cat release/SHA256SUMS.txt
+
+      - name: Crear el release en GitHub
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          zip="release/fangio-v${VERSION}.zip"
+          sha="$(cut -d' ' -f1 release/SHA256SUMS.txt)"
+          args=(--repo "$GITHUB_REPOSITORY" --title "Fangio ${GITHUB_REF_NAME}" --verify-tag --latest)
+          if node scripts/changelog-notes.mjs "$VERSION" > release-notes.md; then
+            echo >> release-notes.md
+          else
+            echo "No hay notas para ${VERSION} en CHANGELOG.md; se generan automáticamente."
+            : > release-notes.md
+            args+=(--generate-notes)
+          fi
+          cat >> release-notes.md <<NOTES
+          ---
+
+          **Instalación:** descargá \`fangio-v${VERSION}.zip\`, extraelo en una carpeta permanente y cargalo en \`chrome://extensions\` con «Cargar descomprimida» ([guía](https://github.com/${GITHUB_REPOSITORY}/blob/main/docs/INSTALL.md)).
+
+          **Actualización:** ejecutá \`update.cmd\` (Windows) o \`update.sh\` dentro de la carpeta instalada y tocá «Recargar» en Fangio. Tus datos se conservan.
+
+          SHA-256 de \`fangio-v${VERSION}.zip\`: \`${sha}\`
+          NOTES
+          args+=(--notes-file release-notes.md)
+          gh release create "$GITHUB_REF_NAME" "$zip" release/SHA256SUMS.txt "${args[@]}"
