@@ -1,0 +1,45 @@
+{
+  "name": "fangio",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Extensión Chromium (MV3) para archivar pestañas en una base local, cerrarlas con seguridad y recuperarlas rápido.",
+  "license": "GPL-3.0-only",
+  "author": "TobiasCoding",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/TobiasCoding/Fangio.git"
+  },
+  "type": "module",
+  "homepage": "https://github.com/TobiasCoding/Fangio#readme",
+  "bugs": {
+    "url": "https://github.com/TobiasCoding/Fangio/issues"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "build:watch": "node scripts/build.mjs --watch",
+    "dev": "node scripts/build.mjs --watch",
+    "typecheck": "tsc -p . --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "node e2e/run.mjs",
+    "icons": "node scripts/gen-icons.mjs",
+    "package": "npm run build && node scripts/package.mjs",
+    "release": "node scripts/release.mjs",
+    "check": "npm run typecheck && npm test && npm run build"
+  },
+  "dependencies": {
+    "idb": "^8.0.4",
+    "preact": "^11.0.1"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.3.5",
+    "esbuild": "^0.28.2",
+    "fake-indexeddb": "^6.2.5",
+    "playwright": "^1.64.0",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
+  }
+}

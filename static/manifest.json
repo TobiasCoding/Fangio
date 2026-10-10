@@ -1,0 +1,55 @@
+{
+  "manifest_version": 3,
+  "name": "Fangio",
+  "short_name": "Fangio",
+  "version": "0.0.0",
+  "description": "Archiva pestañas en una base local, las cierra con seguridad y las recupera rápido. Sin servidores.",
+  "minimum_chrome_version": "121",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAwZwPGF7xuZbFxKBlAabM1NyrKkoRc2DRZ1jbjcFbhWSTcS0ejqW/mz6E/m/aJSwpF2dm4wQYgNl6YswWlHsVn4uDRIdB/G1vKdgDbKmA5f4tTDWjYBsIAclJSDhxJLs/hdjsXoaVZNCJ1nrCmIXZXgnaf2trH1wNIrdso60coqFGb7E3ByzIbXaWxPWp51QRZDjAuOtM2u2twX8x/SVthpuCETrKAKhR9BqaQz1vfg7FRxW/ouD0G7vKXxVYIpWRQ5tJa7fi9xUQ0bUshMdr17TTMBKMsKm7doIgZotCsDhjbf8dxivsCARO63kXNGIZ/vVI0vPJZtjelOcV7Uf0mwIDAQAB",
+  "permissions": [
+    "tabs",
+    "tabGroups",
+    "storage",
+    "alarms",
+    "unlimitedStorage",
+    "favicon"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Fangio",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "commands": {
+    "open-dashboard": {
+      "suggested_key": {
+        "default": "Alt+Shift+F"
+      },
+      "description": "Abrir el panel de Fangio"
+    },
+    "archive-current-tab": {
+      "suggested_key": {
+        "default": "Alt+Shift+A"
+      },
+      "description": "Archivar la pestaña actual"
+    }
+  },
+  "incognito": "not_allowed",
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
+}
