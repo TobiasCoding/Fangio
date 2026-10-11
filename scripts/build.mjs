@@ -26,6 +26,8 @@ const ENTRIES = {
   background: 'src/background/index.ts',
   dashboard: 'src/ui/dashboard/main.tsx',
   popup: 'src/ui/popup/main.tsx',
+  // Dedicated worker for the contextual grouping engine (loaded by the dashboard).
+  'context-worker': 'src/ui/dashboard/contextWorker.ts',
 };
 
 /** Plain files copied as-is: destination (relative to dist/) -> source. */

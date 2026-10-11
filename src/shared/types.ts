@@ -99,6 +99,8 @@ export interface TabRecord {
   reopenCount: number;
   /** Ids of records merged into this one (duplicates merge). */
   mergedFrom: string[];
+  /** Record of the tab this one was opened from (link followed / opener tab), when known. Context signal. */
+  openerId?: string;
 
   /** Present while the record is linked to a tab. Stale if sessionId differs from the current one. */
   live: LiveBinding | null;
@@ -168,6 +170,13 @@ export interface Settings {
   updateCheck: boolean;
   /** Action log entries older than this are pruned. */
   logRetentionDays: number;
+  /**
+   * Save a small screenshot of each page while you look at it (cards view). Off by default;
+   * automatic capture also needs the optional "<all_urls>" host permission granted by the user.
+   */
+  thumbnails: boolean;
+  /** Host patterns never captured as thumbnails (on top of siteExclusions and sensitive URLs). */
+  thumbnailExclusions: string[];
   /** Epoch ms of the last JSON/HTML export made by the user (reminder in the UI). */
   lastBackupAt?: number;
   /** Set once the initial import wizard was completed (or skipped). */
@@ -353,6 +362,19 @@ export interface ImportJsonResult {
 }
 
 // ---------------------------------------------------------------- status
+
+/** Downscaled screenshot of a page (store "thumbs", key = record id). Never exported in backups. */
+export interface ThumbEntry {
+  id: string;
+  /** URL the page showed when captured. */
+  url: string;
+  at: number;
+  w: number;
+  h: number;
+  /** MIME type of data (image/webp or image/jpeg). */
+  type: string;
+  data: ArrayBuffer;
+}
 
 export interface StatusInfo {
   version: string;

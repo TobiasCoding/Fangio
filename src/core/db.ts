@@ -10,10 +10,11 @@ import {
   STORE_KV,
   STORE_OPS,
   STORE_RECORDS,
+  STORE_THUMBS,
   WRITE_BATCH_SIZE,
 } from '../shared/constants';
 import { sanitizeSettings } from '../shared/settings';
-import type { ActionEntry, OpJournal, RecordState, Settings, TabRecord } from '../shared/types';
+import type { ActionEntry, OpJournal, RecordState, Settings, TabRecord, ThumbEntry } from '../shared/types';
 
 interface KvEntry {
   key: string;
@@ -31,6 +32,7 @@ interface FangioDB extends DBSchema {
   actions: { key: string; value: ActionEntry; indexes: { at: number } };
   ops: { key: string; value: StoredOp; indexes: { finishedFlag: number } };
   kv: { key: string; value: KvEntry };
+  thumbs: { key: string; value: ThumbEntry; indexes: { at: number } };
 }
 
 export type FangioDb = IDBPDatabase<FangioDB>;
@@ -67,6 +69,11 @@ export function getDb(): Promise<FangioDb> {
           const ops = db.createObjectStore(STORE_OPS, { keyPath: 'id' });
           ops.createIndex('finishedFlag', 'finishedFlag');
           db.createObjectStore(STORE_KV, { keyPath: 'key' });
+        }
+        if (oldVersion < 2) {
+          // v2: page thumbnails (optional feature). Separate store: records stay small and exports never include images.
+          const thumbs = db.createObjectStore(STORE_THUMBS, { keyPath: 'id' });
+          thumbs.createIndex('at', 'at');
         }
       },
       blocking() {
@@ -111,6 +118,11 @@ function hookAfter(store: string): void {
 export async function getAllRecords(): Promise<TabRecord[]> {
   const db = await getDb();
   return db.getAll(STORE_RECORDS);
+}
+
+export async function getAllRecordIds(): Promise<string[]> {
+  const db = await getDb();
+  return db.getAllKeys(STORE_RECORDS);
 }
 
 export async function getRecord(id: string): Promise<TabRecord | undefined> {
@@ -198,17 +210,93 @@ export async function putRecords(records: readonly TabRecord[], opts: PutRecords
   }
 }
 
+/** Permanent deletion; the thumbnails of those records go in the same transaction. */
 export async function deleteRecords(ids: readonly string[]): Promise<void> {
   if (ids.length === 0) return;
   const db = await getDb();
   for (let i = 0; i < ids.length; i += WRITE_BATCH_SIZE) {
     const batch = ids.slice(i, i + WRITE_BATCH_SIZE);
     hookBefore(STORE_RECORDS);
-    const tx = db.transaction(STORE_RECORDS, 'readwrite', { durability: 'strict' });
-    for (const id of batch) void tx.store.delete(id).catch(() => {});
+    const tx = db.transaction([STORE_RECORDS, STORE_THUMBS], 'readwrite', { durability: 'strict' });
+    const recs = tx.objectStore(STORE_RECORDS);
+    const thumbs = tx.objectStore(STORE_THUMBS);
+    for (const id of batch) {
+      void recs.delete(id).catch(() => {});
+      void thumbs.delete(id).catch(() => {});
+    }
     await tx.done;
     hookAfter(STORE_RECORDS);
   }
+}
+
+// ------------------------------------------------------------------ thumbnails
+
+export async function getThumb(id: string): Promise<ThumbEntry | undefined> {
+  if (typeof id !== 'string' || !id) return undefined;
+  const db = await getDb();
+  return db.get(STORE_THUMBS, id);
+}
+
+/** Several thumbnails in one readonly transaction (missing ids are omitted). */
+export async function getThumbs(ids: readonly string[]): Promise<Map<string, ThumbEntry>> {
+  const out = new Map<string, ThumbEntry>();
+  const list = [...new Set(ids)].filter((x) => typeof x === 'string' && x);
+  if (list.length === 0) return out;
+  const db = await getDb();
+  const tx = db.transaction(STORE_THUMBS, 'readonly');
+  const res = await Promise.all(list.map((id) => tx.store.get(id)));
+  await tx.done;
+  for (const t of res) if (t) out.set(t.id, t);
+  return out;
+}
+
+/** Ids of every stored thumbnail (cheap: keys only). */
+export async function getThumbIds(): Promise<string[]> {
+  const db = await getDb();
+  return db.getAllKeys(STORE_THUMBS);
+}
+
+export async function putThumb(t: ThumbEntry): Promise<void> {
+  const db = await getDb();
+  hookBefore(STORE_THUMBS);
+  // Relaxed durability: a lost thumbnail is recaptured; never worth an fsync.
+  const tx = db.transaction(STORE_THUMBS, 'readwrite', { durability: 'relaxed' });
+  void tx.store.put(t).catch(() => {});
+  await tx.done;
+  hookAfter(STORE_THUMBS);
+}
+
+export async function deleteThumbs(ids: readonly string[]): Promise<void> {
+  if (ids.length === 0) return;
+  const db = await getDb();
+  hookBefore(STORE_THUMBS);
+  const tx = db.transaction(STORE_THUMBS, 'readwrite', { durability: 'relaxed' });
+  for (const id of ids) void tx.store.delete(id).catch(() => {});
+  await tx.done;
+  hookAfter(STORE_THUMBS);
+}
+
+/**
+ * Drops thumbnails whose record no longer exists, then the oldest ones above max.
+ * Returns how many were deleted.
+ */
+export async function pruneThumbs(max: number, existingIds: ReadonlySet<string>): Promise<number> {
+  const db = await getDb();
+  const orphans: string[] = [];
+  const kept: { id: string; at: number }[] = [];
+  const tx = db.transaction(STORE_THUMBS, 'readonly');
+  let cursor = await tx.store.index('at').openKeyCursor();
+  while (cursor) {
+    const id = cursor.primaryKey;
+    if (existingIds.has(id)) kept.push({ id, at: cursor.key });
+    else orphans.push(id);
+    cursor = await cursor.continue();
+  }
+  await tx.done;
+  const excess = kept.length > max ? kept.slice(0, kept.length - max).map((k) => k.id) : [];
+  const del = [...orphans, ...excess];
+  await deleteThumbs(del);
+  return del.length;
 }
 
 // ------------------------------------------------------------------ kv / settings

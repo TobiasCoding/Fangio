@@ -6,7 +6,20 @@ import { send } from '../../common/api';
 import { toast } from '../../common/feedback';
 import { fmtDateTime, fmtRelative, SOURCE_LABELS } from '../../common/format';
 import { Favicon, NoteEditor, StateBadge, Switch, TagEditor } from '../../common/widgets';
+import { useStore } from '../../common/store';
 import { closeRecords, editRecords, focusTab, purgeRecords, reopenRecords, restoreRecords } from '../ops';
+import { thumbFor, thumbsVersion } from '../thumbCache';
+
+function DrawerThumb({ r }: { r: TabRecord }) {
+  useStore(thumbsVersion);
+  const t = thumbFor(r);
+  if (!t) return null;
+  return (
+    <div class="drawer-thumb">
+      <img class="thumb-img" src={t.src} alt="Miniatura de la página" title={'Captura: ' + fmtDateTime(t.at)} />
+    </div>
+  );
+}
 
 function DateRow({ label, ms, hint }: { label: string; ms?: number; hint?: string }) {
   return (
@@ -94,6 +107,7 @@ export function Drawer({ record: r, onClose, projects, tags }: { record: TabReco
       </div>
 
       <div class="drawer-body">
+        <DrawerThumb r={r} />
         <div class="row wrap">
           <StateBadge state={r.state} />
           {r.protected && <span class="chip chip-protected">Protegida</span>}
