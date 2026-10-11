@@ -8,6 +8,12 @@ publican también en la página de [releases](https://github.com/TobiasCoding/Fa
 
 ## [Unreleased]
 
+### Corregido
+
+- `update.ps1` / `update.cmd` no encontraban la carpeta instalada al ejecutarse con Windows
+  PowerShell 5.1 (`$PSScriptRoot` vacío como valor por defecto de un parámetro) y pedían
+  `-InstallDir`. Ahora usan la carpeta del script.
+
 ## [1.1.0] - 2026-10-11
 
 ### Agregado
