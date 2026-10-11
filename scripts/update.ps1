@@ -32,7 +32,7 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$InstallDir = $PSScriptRoot,
+    [string]$InstallDir,
     [string]$Version,
     [switch]$Force
 )
@@ -178,6 +178,11 @@ function Install-Files([string]$From, [string]$To) {
 
 # ---------------------------------------------------------------------------------------
 
+# Default: the folder of this script. Not as a param() default: Windows PowerShell 5.1 leaves
+# $PSScriptRoot empty there when run with -File (update.cmd), so resolve it here.
+if (-not $InstallDir) {
+    $InstallDir = if ($PSScriptRoot) { $PSScriptRoot } elseif ($MyInvocation.MyCommand.Path) { Split-Path -Parent $MyInvocation.MyCommand.Path } else { '' }
+}
 if (-not $InstallDir) {
     Die 'No s\u00E9 d\u00F3nde est\u00E1 instalado Fangio. Ejecut\u00E1 el script desde la carpeta de la extensi\u00F3n o pas\u00E1 -InstallDir <carpeta>.'
 }
