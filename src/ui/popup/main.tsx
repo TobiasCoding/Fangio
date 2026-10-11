@@ -45,6 +45,8 @@ function Popup() {
       }
       const res = await send({ type: 'getTabRecord', tabId: t.id });
       setRecord(res.record);
+      // Opening the popup grants activeTab: a thumbnail can be taken now (only if enabled; guards apply).
+      if (res.record) send({ type: 'captureTab', tabId: t.id }).catch(() => {});
       recordId.current = res.record?.id ?? null;
       if (res.tab) setTab(res.tab);
       setError(null);

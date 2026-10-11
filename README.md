@@ -25,6 +25,7 @@
 - [Instalación](#instalación)
 - [Primer uso](#primer-uso)
 - [Uso diario](#uso-diario)
+- [Vistas y temas sugeridos](#vistas-y-temas-sugeridos)
 - [Reglas automáticas y el objetivo de 15 pestañas](#reglas-automáticas-y-el-objetivo-de-15-pestañas)
 - [Duplicados](#duplicados)
 - [Papelera y eliminación definitiva](#papelera-y-eliminación-definitiva)
@@ -50,6 +51,9 @@ Así podés cerrar pestañas sin miedo: la referencia queda guardada y la reabr�
   etiquetas, proyecto y estado.
 - **Automatizar** (opcional) el cierre de pestañas inactivas hasta un objetivo de pestañas
   abiertas, siempre con previsualización y respetando las protecciones.
+- **Ver** lo guardado como lista, tarjetas con miniaturas, línea de tiempo por sesiones o
+  **temas sugeridos**: grupos que Fangio arma solo, en tu equipo, relacionando lo que buscaste,
+  lo que hablaste con una IA y los sitios que abriste cerca en el tiempo.
 - **Recuperar** cualquier cosa: papelera, registro con deshacer y copias de seguridad.
 
 ## Garantías de seguridad
@@ -180,6 +184,43 @@ Cerrar una pestaña a mano (con la X o `Ctrl+W`) la manda a la **papelera** con 
 cambia nada: si la sesión se restaura, las referencias se vuelven a vincular; si no, quedan
 **archivadas** (nunca se borran).
 
+## Vistas y temas sugeridos
+
+Arriba a la derecha del panel elegís cómo ver el mismo conjunto filtrado. La búsqueda, los
+filtros, la selección y las acciones funcionan igual en todas.
+
+- **Lista**: compacta y rápida, con atajos de teclado.
+- **Tarjetas**: cada referencia con su **miniatura** (si activaste las miniaturas) o un
+  póster con el color y el ícono del sitio.
+- **Línea de tiempo**: agrupada por día y por **sesión de trabajo** (actividad sin pausas de
+  más de 45 minutos), con un histograma de actividad por hora. Un clic en la casilla de un
+  día o de una sesión selecciona todas sus referencias (por ejemplo, para archivar «la sesión
+  de ayer a la tarde»). La fecha usada sigue a **Orden**.
+- **Temas**: grupos sugeridos automáticamente. Fangio relaciona referencias que comparten
+  palabras (en el título, en lo que buscaste en Google, Bing, YouTube o Mercado Libre, o en la
+  URL) y las pondera por **cercanía en el tiempo**: una búsqueda, una conversación con
+  ChatGPT sobre lo mismo y los sitios que leíste a continuación quedan juntos, aunque sean de
+  dominios distintos. También cuentan la pestaña desde la que abriste otra, el grupo de
+  Chrome y el proyecto. Cada tema muestra el **recorrido** (búsqueda → chat con IA →
+  sitios), los términos en común y su afinidad, y permite **seleccionarlo**, asignarle un
+  **proyecto** o **etiqueta**, crear un **grupo de pestañas de Chrome** con las abiertas,
+  reabrirlo, archivarlo o descartar la sugerencia. Todo se calcula en tu equipo; la
+  investigación y el algoritmo están en [docs/CONTEXT.md](docs/CONTEXT.md).
+- **Nombrar con IA local** (opcional): si tu Chrome trae su modelo integrado (Gemini Nano) y
+  el equipo lo admite, Fangio puede usarlo para ponerle nombres naturales a los temas
+  («Comprar bicicleta rodado 29») y señalar títulos que no encajan. Corre en el dispositivo;
+  si el modelo no está descargado, Chrome lo baja una vez después de que lo confirmes.
+
+### Miniaturas
+
+Apagadas por defecto. Se activan en **Reglas → Miniaturas de páginas**. Fangio guarda una
+captura de 320 px de la página que estás mirando (sólo de la pestaña visible, después de que
+termina de cargar), únicamente en tu equipo y **sin** incluirla en las copias JSON. Nunca
+captura incógnito, sitios excluidos, los sitios que agregues a «No capturar estos sitios» ni
+páginas de inicio de sesión, cuenta o pagos. Para capturar automáticamente Chrome te pide el
+permiso opcional de acceso a los sitios (ver [Permisos](#permisos)); si no lo concedés, las
+miniaturas se toman sólo al abrir el popup o al archivar con el atajo.
+
 ## Reglas automáticas y el objetivo de 15 pestañas
 
 La automatización está **apagada** hasta que la activás en **Reglas**. Cuando está activa,
@@ -262,8 +303,9 @@ y fuentes en [docs/INSTALL.md](docs/INSTALL.md#por-qué-no-se-actualiza-sola)). 
 
 ## Permisos
 
-Fangio pide sólo lo necesario y **ningún permiso de host**: no puede leer ni modificar el
-contenido de las páginas y no inyecta scripts en ellas.
+Fangio pide sólo lo necesario y **no inyecta scripts en las páginas**: nunca lee ni modifica
+su contenido. El único permiso de host es **opcional** y está apagado hasta que activás las
+miniaturas automáticas.
 
 | Permiso | Para qué |
 |---|---|
@@ -273,6 +315,8 @@ contenido de las páginas y no inyecta scripts en ellas.
 | `alarms` | Tareas periódicas: reglas, mantenimiento y la consulta diaria de versiones. |
 | `unlimitedStorage` | Que el navegador no desaloje la base local por falta de espacio. |
 | `favicon` | Mostrar íconos de sitios desde la caché del navegador, sin visitar los sitios. |
+| `activeTab` | Tomar la miniatura de la pestaña en la que abrís el popup o usás el atajo de archivar (sin advertencia). |
+| `<all_urls>` (**opcional**) | Sólo si activás las miniaturas automáticas: capturar la pestaña visible con `captureVisibleTab`. Chrome lo muestra como «leer y cambiar tus datos en todos los sitios»; Fangio no lo usa para nada más y lo devuelve al desactivar la opción. |
 
 El manifiesto incluye una clave pública (`key`) que fija el ID de la extensión
 (`domaedkeecbijcmbcjcfpjeabbdcmefb`), para que cada actualización sea reconocida como la
@@ -318,6 +362,7 @@ npm run dev          # compila y recompila al guardar (alias: build:watch)
 npm run typecheck    # TypeScript sin emitir
 npm test             # pruebas unitarias (Vitest)
 npm run test:e2e     # pruebas de punta a punta con Playwright
+npm run test:e2e:views  # e2e de vistas, miniaturas y temas (requiere openssl)
 npm run check        # typecheck + test + build
 npm run package      # build + release/fangio-vX.Y.Z.zip + SHA256SUMS.txt
 npm run icons        # regenera los PNG de static/icons/
@@ -352,8 +397,12 @@ vuelve a verificar todo, empaqueta el zip y publica el release con sus notas y s
 
 Resumen (detalle completo, metodología y limitaciones en [docs/TESTING.md](docs/TESTING.md)):
 
-- **Pruebas unitarias:** 113/113 (persistencia, interrupciones, reglas, protecciones,
-  duplicados, importación/exportación, fallos de almacenamiento, 800+ registros).
+- **Pruebas unitarias:** 137/137 (persistencia, interrupciones, reglas, protecciones,
+  duplicados, importación/exportación, fallos de almacenamiento, 800+ registros, motor de
+  temas, migración de la base, miniaturas).
+- **Vistas y temas en navegador real:** 14/14 comprobaciones (miniaturas reales, grupos
+  búsqueda → ChatGPT → sitios, grupo de Chrome creado) — ver
+  [docs/TESTING.md](docs/TESTING.md#vistas-y-análisis-contextual-v11).
 - **Pruebas de punta a punta en navegador real aislado** (Chromium de Playwright 156,
   perfil temporal, nunca el navegador del usuario): **9/9 escenarios con 820 pestañas**
   en 4 ventanas (fijadas, grupos, duplicados, audio).

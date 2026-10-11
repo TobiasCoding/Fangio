@@ -1,11 +1,22 @@
 export const DB_NAME = 'fangio';
-export const DB_VERSION = 1;
+export const DB_VERSION = 2;
 
 /** Object stores. */
 export const STORE_RECORDS = 'records'; // keyPath id; indexes: state, url, domain, tags(multiEntry), updatedAt
 export const STORE_ACTIONS = 'actions'; // keyPath id; index: at
 export const STORE_OPS = 'ops'; // keyPath id; index: finished (stored as 0/1 in field finishedFlag)
 export const STORE_KV = 'kv'; // keyPath key; { key: 'settings', value: Settings } etc.
+export const STORE_THUMBS = 'thumbs'; // keyPath id (record id); index: at. Added in DB version 2.
+
+/** Thumbnails kept at most (oldest captures are pruned first). */
+export const MAX_THUMBNAILS = 3000;
+/** Thumbnail width in px (height follows the tab aspect ratio, capped at THUMB_MAX_H). */
+export const THUMB_W = 320;
+export const THUMB_MAX_H = 240;
+/** A page is captured again only if its thumbnail is older than this (or its URL changed). */
+export const THUMB_REFRESH_MS = 15 * 60 * 1000;
+/** Wait after a tab becomes visible/loaded before capturing (lets the page paint). */
+export const THUMB_SETTLE_MS = 1500;
 
 export const MAX_FAVICON_URL_LENGTH = 2048;
 export const MAX_PREVIOUS_URLS = 10;

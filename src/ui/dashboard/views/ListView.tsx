@@ -1,4 +1,6 @@
-// Main list: search, filters, sort, virtualized rows, selection + bulk actions, detail drawer.
+// Main list: search, filters, sort, selection + bulk actions, detail drawer, and four ways
+// to look at the same filtered set: list (virtualized rows), cards (thumbnails), timeline
+// (days and work sessions) and topics (contextual group suggestions).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import type { TabRecord } from '../../../shared/types';
@@ -22,26 +24,33 @@ import {
 } from '../search';
 import type { Filters, SortDir, SortKey, StateFilter } from '../search';
 import { VirtualList } from '../VirtualList';
+import { CardGrid } from './CardGrid';
 import { Drawer } from './Drawer';
+import { Timeline } from './Timeline';
+import { TopicsView } from './Topics';
 
 const ROW_H = 32;
 const PREFS_KEY = 'fangio.list.prefs';
 
+export type ViewMode = 'list' | 'cards' | 'timeline' | 'topics';
+export const VIEW_LABELS: Record<ViewMode, string> = { list: 'Lista', cards: 'Tarjetas', timeline: 'Línea de tiempo', topics: 'Temas' };
+
 interface Prefs {
   sortKey: SortKey;
   sortDir: SortDir;
+  view: ViewMode;
 }
 
 function loadPrefs(): Prefs {
   try {
     const p = JSON.parse(localStorage.getItem(PREFS_KEY) ?? 'null') as Partial<Prefs> | null;
     if (p && p.sortKey && p.sortKey in SORT_LABELS && (p.sortDir === 'asc' || p.sortDir === 'desc')) {
-      return { sortKey: p.sortKey, sortDir: p.sortDir };
+      return { sortKey: p.sortKey, sortDir: p.sortDir, view: p.view && p.view in VIEW_LABELS ? p.view : 'list' };
     }
   } catch {
     // ignore
   }
-  return { sortKey: 'accessed', sortDir: 'desc' };
+  return { sortKey: 'accessed', sortDir: 'desc', view: 'list' };
 }
 
 function isTypingTarget(t: EventTarget | null): boolean {
@@ -93,6 +102,7 @@ export function ListView() {
   const sorted = useMemo(() => sortRecords(list, prefs.sortKey, prefs.sortDir), [list, prefs]);
   const filtered = useMemo(() => filterRecords(sorted, filters), [sorted, filters]);
   const filteredIds = useMemo(() => new Set(filtered.map((r) => r.id)), [filtered]);
+  const indexOf = useMemo(() => new Map(filtered.map((r, i) => [r.id, i])), [filtered]);
   const stateScoped = useMemo(() => list.filter((r) => matchesState(r, filters.state)), [list, filters.state]);
   const domainOpts = useMemo(() => countBy(stateScoped, (r) => r.domain), [stateScoped]);
   const tagOpts = useMemo(() => countBy(stateScoped, (r) => r.tags), [stateScoped]);
@@ -404,6 +414,25 @@ export function ListView() {
   const stateOptions = Object.keys(STATE_FILTER_LABELS) as StateFilter[];
   const stateCount = (s: StateFilter) => stateCounts[s];
   const retention = settings?.trashRetentionDays;
+  const emptyEl = (
+    <div class="empty">
+      {list.length === 0
+        ? 'Todavía no hay referencias guardadas.'
+        : filtersActive
+          ? 'Nada coincide con la búsqueda y los filtros.'
+          : 'No hay referencias en este estado.'}
+    </div>
+  );
+  const selectIds = (ids: string[], add: boolean) =>
+    setSelection((sel) => {
+      const next = new Set(sel);
+      for (const id of ids) {
+        if (add) next.add(id);
+        else next.delete(id);
+      }
+      return next;
+    });
+  const clickAt = (e: MouseEvent, r: TabRecord) => onRowClick(e, r, indexOf.get(r.id) ?? 0);
 
   return (
     <div class={`listview${drawerId ? ' has-drawer' : ''}`}>
@@ -443,6 +472,18 @@ export function ListView() {
                 }}
               >
                 {STATE_FILTER_LABELS[s]} <span class="faint">{fmtNum(stateCount(s))}</span>
+              </button>
+            ))}
+          </div>
+          <div class="seg seg-views" role="group" aria-label="Vista">
+            {(Object.keys(VIEW_LABELS) as ViewMode[]).map((v) => (
+              <button
+                type="button"
+                class={'seg-btn' + (prefs.view === v ? ' is-on' : '')}
+                aria-pressed={prefs.view === v}
+                onClick={() => setPrefs({ ...prefs, view: v })}
+              >
+                {VIEW_LABELS[v]}
               </button>
             ))}
           </div>
@@ -609,32 +650,38 @@ export function ListView() {
                 </button>
               </>
             )}
-            {filters.state !== 'trash' && (
+            {filters.state !== 'trash' && prefs.view !== 'topics' && (
               <span class="faint hide-narrow">
-                Clic: detalle · doble clic o Enter: reabrir · Mayús+clic: rango · Espacio: seleccionar
+                {prefs.view === 'list'
+                  ? 'Clic: detalle · doble clic o Enter: reabrir · Mayús+clic: rango · Espacio: seleccionar'
+                  : prefs.view === 'cards'
+                    ? 'Clic: detalle · doble clic: reabrir · Ctrl+clic: seleccionar · las miniaturas se activan en Reglas'
+                    : 'Agrupado por día y por sesión de trabajo (pausas de más de 45 min) · el orden y la fecha siguen a «Orden»'}
               </span>
             )}
           </div>
         )}
 
-        <div class="lhead" aria-hidden="true">
-          <span class="c-check">
-            <input
-              type="checkbox"
-              tabIndex={-1}
-              checked={allFilteredSelected}
-              onClick={() => (allFilteredSelected ? unselectFiltered() : selectAllFiltered())}
-              title="Seleccionar todos los filtrados"
-            />
-          </span>
-          <span />
-          <span>Título</span>
-          <span />
-          <span>Dominio</span>
-          <span>Estado</span>
-          <span>{prefs.sortKey === 'created' ? 'Creación' : prefs.sortKey === 'archived' ? 'Archivado' : 'Fecha'}</span>
-          <span />
-        </div>
+        {prefs.view === 'list' && (
+          <div class="lhead" aria-hidden="true">
+            <span class="c-check">
+              <input
+                type="checkbox"
+                tabIndex={-1}
+                checked={allFilteredSelected}
+                onClick={() => (allFilteredSelected ? unselectFiltered() : selectAllFiltered())}
+                title="Seleccionar todos los filtrados"
+              />
+            </span>
+            <span />
+            <span>Título</span>
+            <span />
+            <span>Dominio</span>
+            <span>Estado</span>
+            <span>{prefs.sortKey === 'created' ? 'Creación' : prefs.sortKey === 'archived' ? 'Archivado' : 'Fecha'}</span>
+            <span />
+          </div>
+        )}
 
         {!loaded ? (
           <div class="center-pad">
@@ -642,6 +689,47 @@ export function ListView() {
           </div>
         ) : error ? (
           <div class="notice notice-danger">No se pudo leer la base de datos: {error}</div>
+        ) : prefs.view === 'cards' ? (
+          <CardGrid
+            items={filtered}
+            selection={selection}
+            activeId={drawerId}
+            sortKey={prefs.sortKey}
+            now={now}
+            resetKey={resetKey}
+            empty={emptyEl}
+            onCardClick={onRowClick}
+            onToggle={toggleOne}
+            onOpen={(r) => (r.state === 'open' ? setDrawerId(r.id) : void reopenRecords([r.id]))}
+          />
+        ) : prefs.view === 'timeline' ? (
+          <Timeline
+            items={filtered}
+            sortKey={prefs.sortKey}
+            sortDir={prefs.sortDir}
+            now={now}
+            selection={selection}
+            activeId={drawerId}
+            resetKey={resetKey}
+            empty={emptyEl}
+            onRowClick={clickAt}
+            onToggle={(r) => toggleOne(r, indexOf.get(r.id) ?? 0, false)}
+            onOpen={(r) => (r.state === 'open' ? setDrawerId(r.id) : void reopenRecords([r.id]))}
+            onSelectIds={selectIds}
+          />
+        ) : prefs.view === 'topics' ? (
+          <div class="records topics-scroll">
+            <TopicsView
+              records={filtered}
+              byId={byId}
+              projects={projectOpts.map((p) => p.value)}
+              onSelect={(ids) => {
+                setSelection(new Set(ids));
+                toast('Seleccionadas ' + plural(ids.length, 'referencia', 'referencias') + ': usá las acciones de arriba.', { kind: 'info' });
+              }}
+              onOpenDrawer={(id) => setDrawerId(id)}
+            />
+          </div>
         ) : (
           <VirtualList
             items={filtered}
@@ -663,15 +751,7 @@ export function ListView() {
                 if (cursor < 0 && filtered.length) setCursor(0);
               },
             }}
-            empty={
-              <div class="empty">
-                {list.length === 0
-                  ? 'Todavía no hay referencias guardadas.'
-                  : filtersActive
-                    ? 'Nada coincide con la búsqueda y los filtros.'
-                    : 'No hay referencias en este estado.'}
-              </div>
-            }
+            empty={emptyEl}
           />
         )}
       </div>

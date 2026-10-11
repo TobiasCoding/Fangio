@@ -160,6 +160,47 @@ registros duplicados en el mismo escenario).
   renderizadores vivos (~17 GB privados): `chrome.tabs.discard` no liberó los procesos en este
   build. Por eso la plantilla se arma con `--renderer-process-limit=6` y se reinicia.
 
+## Vistas y análisis contextual (v1.1)
+
+```bash
+npm run test:e2e:views           # compila, ~1 min; capturas en e2e/.results/views/
+node e2e/views.mjs --headed --no-build
+```
+
+Navegador aislado igual que la batería principal (Chromium de Playwright, perfil temporal).
+Todos los nombres de host se resuelven a un servidor HTTPS local
+(`--host-resolver-rules`, certificado autofirmado descartable creado con `openssl`,
+`--ignore-certificate-errors`): «google.com», «chatgpt.com» o «react.dev» son páginas de
+prueba locales y **nada sale a la red** (HTTPS porque esos dominios tienen HSTS precargado).
+La extensión se carga desde una copia de `dist/` con el permiso opcional `<all_urls>` ya
+concedido, porque el diálogo de permisos del navegador no se puede aceptar por automatización.
+
+Escenario: 14 pestañas abiertas de a una y vistas 2,7 s cada una — una búsqueda de Google
+sobre hooks de React seguida de una conversación de ChatGPT y tres sitios (abiertos desde la
+búsqueda, con `openerTabId`), una búsqueda de bicicletas con tienda, blog y video, tres
+páginas sobre Lisboa y ruido (clima, una receta).
+
+Resultado medido (Chromium 156, i7-12700K, Windows 11): **14/14 comprobaciones**.
+
+| Comprobación | Resultado |
+|---|---|
+| Registros y pestaña de origen | 14/14 registros; `openerId` correcto en las 3 pestañas abiertas desde la búsqueda |
+| Miniaturas reales | 14 capturas WebP de 320 px (≈2,5 KB en estas páginas simples; páginas reales pesan más) |
+| Tarjetas | 14 tarjetas con miniatura; tras «Borrar todas las miniaturas», pósters generados |
+| Línea de tiempo | filas de día y de sesión |
+| Temas | 3 grupos: «Hooks · useEffect · React» (búsqueda + ChatGPT + 3 sitios, recorrido que empieza en la búsqueda), «Bicicleta · rodado · MTB» (búsqueda + tienda + blog + video), «Lisboa» (3); clima y receta fuera de todo grupo |
+| Análisis | 3–8 ms para 14 referencias en el *worker*; 10.000 referencias sintéticas ≈0,2 s (prueba unitaria en Node) |
+| Agrupar en Chrome | grupo de pestañas nativo con las 5 pestañas del tema |
+| Reglas → Miniaturas | el interruptor refleja el ajuste guardado y no avisa de permiso faltante |
+
+Después de los cambios de la v1.1 (migración de la base a la versión 2, `openerId`,
+listeners de miniaturas) la batería principal volvió a pasar completa: `node e2e/run.mjs
+--tabs 200 --quick` → **9/9 escenarios**.
+
+No cubierto: el diálogo real de permisos, la IA integrada de Chrome (Gemini Nano no está en
+el Chromium de Playwright; el código detecta su ausencia y oculta el botón) y temas con miles
+de referencias reales.
+
 ## ESTIMACIONES (no medidas)
 
 - En Chrome estable 155 con un perfil real los tiempos deberían ser del mismo orden: el costo
