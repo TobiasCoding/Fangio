@@ -19,6 +19,7 @@ import * as tracker from '../core/tracker';
 import { runAutomation } from '../core/automation';
 import { checkForUpdate } from '../core/updateCheck';
 import { archiveTab } from '../core/closeOp';
+import * as thumbs from '../core/thumbs';
 import { handleRequest } from './router';
 
 const MAINTENANCE_PERIOD_MIN = 15;
@@ -111,6 +112,7 @@ export async function runMaintenance(): Promise<void> {
   await tracker.reconcile();
   await purgeExpired();
   await pruneLog();
+  await thumbs.pruneThumbnails().catch(() => 0);
   scheduleBadge();
 }
 
@@ -214,6 +216,8 @@ async function handleCommand(command: string, tab?: chrome.tabs.Tab): Promise<vo
       await flashRefused();
       return;
     }
+    // The shortcut grants activeTab: keep a thumbnail of what is being archived (if enabled; never blocks long).
+    await Promise.race([thumbs.captureTab(target.id, { viaActiveTab: true }).catch(() => null), new Promise((r) => setTimeout(r, 1500))]);
     const res = await archiveTab(target.id, false, 'Archivada con el atajo de teclado');
     if (res.done.length === 0) await flashRefused();
   }
@@ -264,8 +268,14 @@ export function __killForTests(): void {
 // ------------------------------------------------------------------ listeners (synchronous, top level)
 
 chrome.tabs.onCreated.addListener((tab) => tracker.onTabCreated(tab));
-chrome.tabs.onUpdated.addListener((tabId, info, tab) => tracker.onTabUpdated(tabId, info, tab));
-chrome.tabs.onActivated.addListener((info) => tracker.onTabActivated(info));
+chrome.tabs.onUpdated.addListener((tabId, info, tab) => {
+  tracker.onTabUpdated(tabId, info, tab);
+  thumbs.onThumbTabUpdated(tabId, info, tab);
+});
+chrome.tabs.onActivated.addListener((info) => {
+  tracker.onTabActivated(info);
+  thumbs.onThumbTabActivated(info);
+});
 chrome.tabs.onRemoved.addListener((tabId, info) => tracker.onTabRemoved(tabId, info));
 chrome.tabs.onReplaced.addListener((added, removed) => tracker.onTabReplaced(added, removed));
 chrome.tabs.onAttached.addListener((tabId) => tracker.onTabMoved(tabId));

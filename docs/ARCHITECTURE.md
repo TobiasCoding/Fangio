@@ -23,7 +23,8 @@ el protocolo de mensajes en `src/shared/messages.ts`, constantes en
    pide confirmación explícita y desprotege).
 5. **Nada sale del equipo.** Sin backend. La única petición de red opcional es la
    consulta diaria de releases en `api.github.com` (no envía datos del usuario; se
-   desactiva en Configuración).
+   desactiva en Configuración). El análisis contextual, las miniaturas y la IA opcional
+   (Gemini Nano de Chrome) corren en el dispositivo.
 
 ## Estados
 
@@ -137,6 +138,9 @@ re-sincroniza títulos y URLs. Los cambios de estado críticos nunca se difieren
 - `onCreated` / `onUpdated(url)` → crear o re-vincular (ver arriba), o actualizar URL
   (la anterior pasa a `previousUrls`).
 - `onActivated` → `lastAccessedAt = ahora`.
+- Pestaña nueva con `openerTabId` de una pestaña vinculada → `openerId` = id del registro de
+  origen (enlace seguido / «abrir en pestaña nueva»). Sólo se fija al crear el registro; es una
+  señal para el análisis contextual.
 - `onUpdated(audible)` → `lastAudibleAt`.
 - `onRemoved` → ver transiciones.
 - `onReplaced` → mover `live.tabId`. `onAttached`/`onDetached` → actualizar `live.windowId`.
@@ -210,12 +214,17 @@ Cada mutación escribe una `ActionEntry` con motivo y `before`. Deshacer:
 - `purge` no se puede deshacer (sólo desde una copia JSON).
 Retención del registro: `logRetentionDays`.
 
-## Persistencia (IndexedDB `fangio`, versión 1)
+## Persistencia (IndexedDB `fangio`, versión 2)
 
 - `records` (keyPath `id`): índices `state`, `url`, `domain`, `tags` (multiEntry), `updatedAt`.
 - `actions` (keyPath `id`): índice `at`.
 - `ops` (keyPath `id`): diario de operaciones.
 - `kv` (keyPath `key`): `settings`, `lastAutoRun`, `updateInfo`, `meta`.
+- `thumbs` (keyPath `id` = id del registro, índice `at`; desde la versión 2): miniaturas
+  `ThumbEntry` (WebP de 320 px como `ArrayBuffer`). Durabilidad relajada (se recapturan). Se
+  borran en la misma transacción que la eliminación definitiva del registro; el mantenimiento
+  elimina huérfanas y las más viejas por encima de `MAX_THUMBNAILS` (3000). Nunca se exportan.
+- La migración 1 → 2 sólo agrega el almacén `thumbs` (aditiva, sin tocar registros).
 Se pide `unlimitedStorage` para que el archivo no sea desalojado. Las migraciones futuras
 se hacen en `onupgradeneeded` sin pérdida de datos.
 
@@ -231,9 +240,35 @@ vínculo; la URL que pierde pasa a `previousUrls`); nunca se borra nada al impor
 rechaza URLs no rastreables. También se exporta HTML en formato de marcadores Netscape (importable en
 cualquier navegador) como vía de recuperación independiente de la extensión.
 
+## Miniaturas (opcional, apagadas por defecto)
+
+`core/thumbs.ts`. Con `settings.thumbnails`, cuando una pestaña queda visible y cargada
+`THUMB_SETTLE_MS` (1,5 s), `chrome.tabs.captureVisibleTab` toma lo que el usuario ya está viendo,
+se reduce a 320 px (`createImageBitmap` + `OffscreenCanvas`, WebP) y se guarda bajo el id del registro.
+Guardas, todas obligatorias: captura automática sólo con el permiso opcional `<all_urls>` concedido
+por el usuario (el popup y el atajo de archivar usan la concesión de `activeTab`); sólo http(s);
+nunca incógnito, sitios excluidos, `thumbnailExclusions` ni URLs sensibles (login, cuenta, pagos,
+parámetros con credenciales); la pestaña debe seguir activa y con la misma URL después de la
+captura; como máximo 2 capturas por segundo; se recaptura sólo si cambió la URL o pasaron
+`THUMB_REFRESH_MS` (15 min). Al desactivar la opción se devuelve el permiso opcional.
+
+## Análisis contextual (vista Temas)
+
+Motor puro en `core/context/` (detalle e investigación en [CONTEXT.md](CONTEXT.md)): rasgos de
+título, consulta de búsqueda y URL; TF-IDF; peso por par = léxico × núcleo temporal de dos
+escalas + pestaña de origen + grupo de Chrome + proyecto; comunidades de Louvain; nombres por
+c-TF-IDF. Corre en un *worker* dedicado (`context-worker.js`) desde el panel, sobre las
+referencias filtradas (máximo 8000, las de actividad más reciente). Sólo usa instantes de
+actividad real (`openedAt`, `lastAccessedAt`), nunca fechas de operaciones masivas. Las acciones
+sobre una sugerencia usan los mensajes existentes (`updateRecords`, `archive`, `reopen`) más
+`groupTabs` (grupo de Chrome por ventana; no cierra, no mueve entre ventanas, ignora fijadas).
+Nombres con IA: opcional, con la Prompt API de Chrome (Gemini Nano en el dispositivo).
+
 ## Interfaz
 
-- `dashboard.html` (pestaña completa): lista virtualizada, búsqueda (título, URL, nota),
+- `dashboard.html` (pestaña completa): cuatro vistas del mismo conjunto filtrado (Lista
+  virtualizada, Tarjetas con miniatura o póster generado, Línea de tiempo por día y sesión de
+  trabajo, Temas sugeridos), búsqueda (título, URL, nota),
   filtros (estado, dominio, etiquetas, proyecto, pendientes, protegidas), orden cronológico,
   acciones individuales y por selección, asistente de importación inicial, reglas con
   previsualización, duplicados, papelera, registro con deshacer, copia de seguridad.
@@ -246,7 +281,10 @@ cualquier navegador) como vía de recuperación independiente de la extensión.
 
 `tabs` (URL/título de pestañas), `tabGroups` (título/color de grupo de origen), `storage`
 (`storage.session`), `alarms`, `unlimitedStorage`, `favicon` (iconos desde la caché del
-navegador vía `/_favicon/` sin visitar sitios). Sin permisos de host ni scripts de contenido.
+navegador vía `/_favicon/` sin visitar sitios), `activeTab` (miniatura de la pestaña en la que se
+abre el popup o se usa el atajo; sin advertencia). Permiso de host **opcional**
+`<all_urls>`: sólo se pide al activar las miniaturas automáticas y sólo se usa para
+`captureVisibleTab`. Sin scripts de contenido: nunca se lee ni modifica el contenido de las páginas.
 El manifiesto incluye una clave pública (`key`) para fijar el ID de la extensión: así la
 base de datos sobrevive aunque se mueva la carpeta de instalación.
 

@@ -39,6 +39,8 @@ export function defaultSettings(): Settings {
     restoreGroups: true,
     updateCheck: true,
     logRetentionDays: 90,
+    thumbnails: false,
+    thumbnailExclusions: [],
     onboardingDone: false,
   };
 }
@@ -83,6 +85,8 @@ export function sanitizeSettings(input: unknown): Settings {
     restoreGroups: bool(s.restoreGroups, d.restoreGroups),
     updateCheck: bool(s.updateCheck, d.updateCheck),
     logRetentionDays: num(s.logRetentionDays, d.logRetentionDays, 1, 3650),
+    thumbnails: bool(s.thumbnails, d.thumbnails),
+    thumbnailExclusions: strList(s.thumbnailExclusions, d.thumbnailExclusions),
     ...(typeof s.lastBackupAt === 'number' ? { lastBackupAt: s.lastBackupAt } : {}),
     onboardingDone: bool(s.onboardingDone, d.onboardingDone),
   };

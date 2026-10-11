@@ -168,6 +168,7 @@ export function validateRecord(x: unknown, now = Date.now()): TabRecord | string
   if (fav) rec.favIconUrl = fav;
   for (const k of OPTIONAL_NUMBERS) if (isNum(x[k])) rec[k] = x[k] as number;
   if (typeof x.lastReason === 'string') rec.lastReason = x.lastReason.slice(0, MAX_REASON_LENGTH);
+  if (typeof x.openerId === 'string' && x.openerId && x.openerId.length <= MAX_ID_LENGTH) rec.openerId = x.openerId;
   if (isObj(x.origin)) {
     const o = x.origin;
     if (isNum(o.windowOrdinal)) rec.origin.windowOrdinal = o.windowOrdinal;

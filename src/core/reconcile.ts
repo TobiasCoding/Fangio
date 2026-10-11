@@ -269,6 +269,9 @@ export function planReconcile(input: ReconcileInput): ReconcilePlan {
       ordinals,
       groups: input.groups,
     });
+    // Context signal: the tab was opened from another tracked tab (link followed, "open in new tab").
+    const openerRec = typeof tab.openerTabId === 'number' ? claimedTab.get(tab.openerTabId) : undefined;
+    if (openerRec) rec.openerId = openerRec;
     plan.changed.set(rec.id, rec);
     cur.set(rec.id, rec);
     plan.created.push(rec.id);

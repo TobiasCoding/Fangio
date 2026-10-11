@@ -11,6 +11,8 @@ import { getKv, getRecordsByState, getSettings } from '../core/db';
 import { mergeRecords } from '../core/duplicates';
 import { applyImport, getImportPreview } from '../core/importWizard';
 import { reopenRecords } from '../core/reopenOp';
+import { groupTabs } from '../core/tabGroups';
+import { captureTab, clearThumbnails } from '../core/thumbs';
 import { rt } from '../core/runtime';
 import { getSession } from '../core/session';
 import { markBackup, markOnboardingDone, saveSettings } from '../core/settingsOps';
@@ -154,6 +156,12 @@ export async function handleRequest(req: Request): Promise<unknown> {
     case 'reloadExtension':
       setTimeout(() => chrome.runtime.reload(), 150);
       return { ok: true };
+    case 'captureTab':
+      return captureTab(int(req.tabId, 'tabId'), { viaActiveTab: true });
+    case 'groupTabs':
+      return groupTabs(ids(req.recordIds), typeof req.title === 'string' ? req.title : '', typeof req.color === 'string' ? req.color : undefined);
+    case 'clearThumbs':
+      return { deleted: await clearThumbnails() };
     default:
       throw new Error(`Solicitud desconocida: ${String((req as { type?: unknown }).type)}`);
   }

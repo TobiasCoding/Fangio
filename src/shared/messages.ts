@@ -19,7 +19,8 @@ export type ChangeEvent =
   | { type: 'settings' }
   | { type: 'actions' }
   | { type: 'ops' }
-  | { type: 'status' };
+  | { type: 'status' }
+  | { type: 'thumbs'; ids: string[] };
 
 /** Fields the user can edit on a record. Tag ops are applied in order: setTags, addTags, removeTags. */
 export interface RecordEdit {
@@ -73,7 +74,13 @@ export type Request =
   | { type: 'getTabRecord'; tabId: number }
   | { type: 'reconcileNow' }
   | { type: 'checkUpdate' }
-  | { type: 'reloadExtension' };
+  | { type: 'reloadExtension' }
+  /** Capture a thumbnail of this (visible) tab now, e.g. when the popup opens (activeTab grant). */
+  | { type: 'captureTab'; tabId: number }
+  /** Put the open tabs of these records into a Chrome tab group per window (title, optional color). */
+  | { type: 'groupTabs'; recordIds: string[]; title: string; color?: string }
+  /** Delete every stored thumbnail. */
+  | { type: 'clearThumbs' };
 
 export interface ResponseMap {
   getStatus: StatusInfo;
@@ -100,6 +107,9 @@ export interface ResponseMap {
   reconcileNow: { ok: true; summary: string };
   checkUpdate: StatusInfo['update'];
   reloadExtension: { ok: true };
+  captureTab: { captured: boolean; reason?: string };
+  groupTabs: { grouped: number; windows: number; skipped: number };
+  clearThumbs: { deleted: number };
 }
 
 /** Envelope returned by the background for every request. */

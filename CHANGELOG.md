@@ -8,6 +8,34 @@ publican también en la página de [releases](https://github.com/TobiasCoding/Fa
 
 ## [Unreleased]
 
+### Agregado
+
+- **Vistas del listado**: Lista, **Tarjetas** (miniatura de la página o póster generado con
+  el color e ícono del sitio), **Línea de tiempo** (por día y por sesión de trabajo, con
+  histograma de actividad por hora y selección de un día o una sesión completa) y **Temas**.
+  Todas comparten búsqueda, filtros, selección y acciones.
+- **Temas sugeridos**: análisis contextual local que agrupa referencias relacionadas aunque
+  sean de sitios distintos, combinando palabras en común (títulos, lo que buscaste en
+  Google/Bing/YouTube/Mercado Libre y palabras de la URL), cercanía en el tiempo y estructura
+  (pestaña de origen, grupo de Chrome, proyecto). Muestra el recorrido (búsqueda → chat con
+  IA → sitios), los términos en común y la afinidad, y permite seleccionar, asignar proyecto,
+  etiquetar, crear un grupo de pestañas de Chrome, reabrir, archivar o descartar la sugerencia.
+  Investigación y diseño en `docs/CONTEXT.md`.
+- **Nombrar con IA local** (opcional): usa Gemini Nano integrado en Chrome, en el dispositivo,
+  para nombrar los grupos y señalar títulos que no pertenecen. Sólo aparece si el navegador
+  y el equipo lo permiten.
+- **Miniaturas de páginas** (opcional, apagadas por defecto): captura reducida de la pestaña
+  visible, guardada sólo localmente, nunca en las copias. Exclusiones propias, filtro de
+  páginas sensibles y botón para borrarlas.
+- Se registra la **pestaña de origen** de cada pestaña nueva (`openerId`), incluida en las
+  copias JSON.
+
+### Cambiado
+
+- Base de datos versión 2 (migración aditiva: nuevo almacén `thumbs`; los registros no cambian).
+- Permisos: se agrega `activeTab` (sin advertencia) y el permiso de host **opcional**
+  `<all_urls>`, que sólo se pide al activar las miniaturas automáticas.
+
 ## [1.0.0] - 2026-10-10
 
 Primera versión pública.
