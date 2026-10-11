@@ -32,6 +32,7 @@ export interface FTab {
   index: number;
   url: string;
   pendingUrl?: string;
+  openerTabId?: number;
   title: string;
   favIconUrl?: string;
   pinned: boolean;

@@ -63,6 +63,8 @@ export function RulesView() {
   const [saved, setSaved] = useState<Settings | null>(null);
   const [draft, setDraft] = useState<Settings | null>(null);
   const [exclText, setExclText] = useState('');
+  const [thumbExclText, setThumbExclText] = useState('');
+  const [hostAccess, setHostAccess] = useState<boolean | null>(null);
   const [saving, setSaving] = useState(false);
   const [preview, setPreview] = useState<RulePreview | null>(null);
   const [previewing, setPreviewing] = useState(false);
@@ -73,6 +75,7 @@ export function RulesView() {
     setSaved(s);
     setDraft(s);
     setExclText(s.siteExclusions.join('\n'));
+    setThumbExclText(s.thumbnailExclusions.join('\n'));
   };
 
   useEffect(() => {
@@ -85,13 +88,21 @@ export function RulesView() {
   }, []);
 
   const exclLines = useMemo(() => splitLines(exclText), [exclText]);
+  const thumbExclLines = useMemo(() => splitLines(thumbExclText), [thumbExclText]);
+
+  useEffect(() => {
+    chrome.permissions
+      ?.contains({ origins: ['<all_urls>'] })
+      .then(setHostAccess)
+      .catch(() => setHostAccess(false));
+  }, []);
 
   // Settings changed elsewhere (popup, import wizard, another dashboard tab):
   // resync a clean form; on a dirty form only follow automationEnabled if the
   // user did not toggle it in this draft.
   useEffect(() => {
     if (!stored || !draft || !saved) return;
-    const isDirty = JSON.stringify({ ...draft, siteExclusions: exclLines }) !== JSON.stringify(saved);
+    const isDirty = JSON.stringify({ ...draft, siteExclusions: exclLines, thumbnailExclusions: thumbExclLines }) !== JSON.stringify(saved);
     if (!isDirty) {
       if (JSON.stringify(stored) !== JSON.stringify(saved)) adopt(stored);
     } else if (draft.automationEnabled === saved.automationEnabled && stored.automationEnabled !== saved.automationEnabled) {
@@ -99,7 +110,7 @@ export function RulesView() {
       setDraft({ ...draft, automationEnabled: stored.automationEnabled });
     }
   }, [stored]);
-  const badExcl = exclLines.filter((l) => !HOST_RE.test(l) && !/^[a-z]+:\/\/[^/]+/i.test(l));
+  const badExcl = [...exclLines, ...thumbExclLines].filter((l) => !HOST_RE.test(l) && !/^[a-z]+:\/\/[^/]+/i.test(l));
   const ruleErrors = useMemo(() => {
     const m = new Map<string, string>();
     for (const r of draft?.urlRules ?? []) {
@@ -112,7 +123,7 @@ export function RulesView() {
   if (loadError) return <div class="page narrow"><div class="notice notice-danger">No se pudo cargar la configuración: {loadError}</div></div>;
   if (!draft || !saved) return <div class="page narrow"><Spinner label="Cargando configuración…" /></div>;
 
-  const dirty = JSON.stringify({ ...draft, siteExclusions: exclLines }) !== JSON.stringify(saved);
+  const dirty = JSON.stringify({ ...draft, siteExclusions: exclLines, thumbnailExclusions: thumbExclLines }) !== JSON.stringify(saved);
   const set = <K extends keyof Settings>(k: K, v: Settings[K]) => setDraft({ ...draft, [k]: v });
   const setRule = (id: string, patch: Partial<UrlRule>) =>
     set('urlRules', draft.urlRules.map((r) => (r.id === id ? { ...r, ...patch } : r)));
@@ -132,6 +143,7 @@ export function RulesView() {
       const next = sanitizeSettings({
         ...draft,
         siteExclusions: exclLines,
+        thumbnailExclusions: thumbExclLines,
         urlRules: draft.urlRules.map((r) => ({ ...r, url: r.url.trim() })),
         // Turning it on is confirmed below, after the rest is saved (the preview must use the new rules).
         automationEnabled: enabling ? false : wantAuto,
@@ -142,6 +154,11 @@ export function RulesView() {
           : {}),
       });
       let res = await send({ type: 'saveSettings', settings: next });
+      // Thumbnails off: give the optional host permission back (least privilege).
+      if (!next.thumbnails && hostAccess) {
+        const removed = await chrome.permissions.remove({ origins: ['<all_urls>'] }).catch(() => false);
+        if (removed) setHostAccess(false);
+      }
       if (enabling) {
         settingsStore.set(res);
         const confirmed = await confirmEnableAutomation();
@@ -325,6 +342,73 @@ export function RulesView() {
           <Switch checked={draft.discardAfterBulkReopen} onChange={(v) => set('discardAfterBulkReopen', v)} label="Descargar de memoria las pestañas reabiertas en masa" hint="Quedan visibles pero no consumen memoria hasta que las mirás." />
           <Switch checked={draft.restoreGroups} onChange={(v) => set('restoreGroups', v)} label="Restaurar grupos de pestañas" hint="Vuelve a agrupar con el título y color originales." />
         </div>
+      </section>
+
+      <section class="card">
+        <h2>Miniaturas de páginas</h2>
+        <p class="muted">
+          Para la vista <strong>Tarjetas</strong>: guarda una captura reducida (320 px) de cada página mientras la mirás. Quedan sólo en
+          este equipo y <strong>no</strong> se incluyen en las copias JSON. Nunca se capturan pestañas de incógnito, sitios excluidos ni
+          páginas de inicio de sesión, cuentas o pagos.
+        </p>
+        <Switch
+          checked={draft.thumbnails}
+          onChange={(v) => {
+            set('thumbnails', v);
+            if (v && !hostAccess) {
+              // Must run inside the click (user gesture).
+              chrome.permissions
+                ?.request({ origins: ['<all_urls>'] })
+                .then((ok) => {
+                  setHostAccess(ok);
+                  if (!ok) toast('Sin el permiso, las miniaturas se toman sólo al abrir el popup o al archivar con el atajo.', { kind: 'info', timeout: 8000 });
+                })
+                .catch(() => setHostAccess(false));
+            }
+          }}
+          label="Guardar miniaturas de las páginas que mirás"
+          hint="Chrome va a pedir permiso para «leer y cambiar tus datos en todos los sitios»: Fangio sólo lo usa para capturar la pestaña visible; no lee ni modifica el contenido de las páginas ni inyecta scripts. Al desactivar las miniaturas, el permiso se devuelve."
+        />
+        {draft.thumbnails && hostAccess === false && (
+          <div class="notice notice-info" style={{ marginTop: '8px' }}>
+            Sin permiso de captura automática: las miniaturas se toman sólo al abrir el popup en una pestaña o al archivarla con el atajo.{' '}
+            <button
+              type="button"
+              class="link"
+              onClick={() =>
+                chrome.permissions
+                  .request({ origins: ['<all_urls>'] })
+                  .then(setHostAccess)
+                  .catch(() => setHostAccess(false))
+              }
+            >
+              Conceder permiso
+            </button>
+          </div>
+        )}
+        <label class="nfield">
+          <span class="nfield-label">
+            No capturar estos sitios
+            <small class="hint">Además de los sitios excluidos de arriba. Uno por línea (por ejemplo, tu banco o el correo del trabajo).</small>
+          </span>
+          <textarea rows={3} class="mono" value={thumbExclText} aria-label="Sitios sin miniaturas" onInput={(e) => setThumbExclText(e.currentTarget.value)} />
+        </label>
+        <button
+          type="button"
+          class="btn btn-sm"
+          onClick={async () => {
+            const ok = await confirmDialog({ title: 'Borrar todas las miniaturas', body: <p>Se eliminan las capturas guardadas. Las referencias no cambian.</p>, confirmLabel: 'Borrar miniaturas' });
+            if (!ok) return;
+            try {
+              const r = await send({ type: 'clearThumbs' });
+              toast(r.deleted ? 'Miniaturas borradas: ' + fmtNum(r.deleted) : 'No había miniaturas guardadas.', { kind: 'info' });
+            } catch (e) {
+              toast('No se pudieron borrar: ' + errMsg(e), { kind: 'error' });
+            }
+          }}
+        >
+          Borrar todas las miniaturas
+        </button>
       </section>
 
       <section class="card">

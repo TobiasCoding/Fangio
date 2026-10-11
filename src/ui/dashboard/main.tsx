@@ -18,7 +18,7 @@ import { LogView } from './views/LogView';
 import { RulesView } from './views/RulesView';
 
 const ROUTES = {
-  lista: 'Lista',
+  lista: 'Referencias',
   importar: 'Importar',
   duplicados: 'Duplicados',
   reglas: 'Reglas',
