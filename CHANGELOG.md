@@ -13,6 +13,9 @@ publican también en la página de [releases](https://github.com/TobiasCoding/Fa
 - `update.ps1` / `update.cmd` no encontraban la carpeta instalada al ejecutarse con Windows
   PowerShell 5.1 (`$PSScriptRoot` vacío como valor por defecto de un parámetro) y pedían
   `-InstallDir`. Ahora usan la carpeta del script.
+- `update.cmd` lanzado desde PowerShell 7 fallaba con «Get-FileHash no se reconoce»: Windows
+  PowerShell heredaba la ruta de módulos de PowerShell 7. `update.cmd`, `update.ps1` e
+  `install.ps1` ahora usan sólo los módulos de Windows PowerShell.
 
 ## [1.1.0] - 2026-10-11
 
