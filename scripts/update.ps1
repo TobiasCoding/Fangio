@@ -32,12 +32,19 @@
 #>
 [CmdletBinding()]
 param(
-    [string]$InstallDir = $PSScriptRoot,
+    [string]$InstallDir,
     [string]$Version,
     [switch]$Force
 )
 
 Set-StrictMode -Version 2.0
+
+# Windows PowerShell started from PowerShell 7 through another program (cmd, update.cmd)
+# inherits PowerShell 7's PSModulePath, whose modules hide Get-FileHash and Expand-Archive.
+# Keep only Windows PowerShell's own module folders for this process.
+if ($PSVersionTable.PSEdition -ne 'Core' -and $env:PSModulePath) {
+    $env:PSModulePath = (($env:PSModulePath -split ';') | Where-Object { $_ -and $_ -notlike '*\PowerShell\*' }) -join ';'
+}
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue' # Invoke-WebRequest is very slow in 5.1 with the progress bar
 
@@ -178,6 +185,11 @@ function Install-Files([string]$From, [string]$To) {
 
 # ---------------------------------------------------------------------------------------
 
+# Default: the folder of this script. Not as a param() default: Windows PowerShell 5.1 leaves
+# $PSScriptRoot empty there when run with -File (update.cmd), so resolve it here.
+if (-not $InstallDir) {
+    $InstallDir = if ($PSScriptRoot) { $PSScriptRoot } elseif ($MyInvocation.MyCommand.Path) { Split-Path -Parent $MyInvocation.MyCommand.Path } else { '' }
+}
 if (-not $InstallDir) {
     Die 'No s\u00E9 d\u00F3nde est\u00E1 instalado Fangio. Ejecut\u00E1 el script desde la carpeta de la extensi\u00F3n o pas\u00E1 -InstallDir <carpeta>.'
 }
