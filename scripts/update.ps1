@@ -38,6 +38,13 @@ param(
 )
 
 Set-StrictMode -Version 2.0
+
+# Windows PowerShell started from PowerShell 7 through another program (cmd, update.cmd)
+# inherits PowerShell 7's PSModulePath, whose modules hide Get-FileHash and Expand-Archive.
+# Keep only Windows PowerShell's own module folders for this process.
+if ($PSVersionTable.PSEdition -ne 'Core' -and $env:PSModulePath) {
+    $env:PSModulePath = (($env:PSModulePath -split ';') | Where-Object { $_ -and $_ -notlike '*\PowerShell\*' }) -join ';'
+}
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue' # Invoke-WebRequest is very slow in 5.1 with the progress bar
 
