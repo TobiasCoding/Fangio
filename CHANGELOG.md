@@ -8,6 +8,8 @@ publican también en la página de [releases](https://github.com/TobiasCoding/Fa
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-10-13
+
 ### Importante: actualizar desde la v1.1.0
 
 El manifiesto ya **no** tiene `key` (la Chrome Web Store rechaza los paquetes que la incluyen).
@@ -113,6 +115,7 @@ Primera versión pública.
   scripts `install.ps1`, `update.ps1` / `update.cmd` y `update.sh` para instalar y
   actualizar la carpeta de la extensión.
 
-[Unreleased]: https://github.com/TobiasCoding/Fangio/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/TobiasCoding/Fangio/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/TobiasCoding/Fangio/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/TobiasCoding/Fangio/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/TobiasCoding/Fangio/releases/tag/v1.0.0
