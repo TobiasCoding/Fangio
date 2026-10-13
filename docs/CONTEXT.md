@@ -1,119 +1,121 @@
-# Análisis contextual: cómo Fangio sugiere grupos
+# Contextual analysis: how Fangio suggests groups
 
-Este documento resume la investigación previa, las alternativas evaluadas y el diseño
-implementado en la vista **Temas** (v1.1). El código está en `src/core/context/`
-(motor puro, sin `chrome.*`), `src/ui/dashboard/context.ts` (entrada desde los registros y
-preferencias) y `src/ui/dashboard/localAi.ts` (IA local opcional).
+This document summarizes the prior research, the alternatives evaluated and the design
+implemented in the **Temas** (Topics) view (v1.1). The code is in `src/core/context/` (pure
+engine, no `chrome.*`), `src/ui/dashboard/context.ts` (input from records and preferences)
+and `src/ui/dashboard/localAi.ts` (optional local AI).
 
-## El problema
+## The problem
 
-Dadas cientos o miles de referencias (URL, título, fechas), proponer grupos que
-correspondan a **una misma tarea o tema**, aunque crucen sitios: una búsqueda en Google,
-una conversación con ChatGPT sobre lo mismo y luego dos o tres sitios leídos en los
-minutos siguientes. Restricciones de Fangio:
+Given hundreds or thousands of references (URL, title, dates), propose groups that
+correspond to **a single task or topic**, even across sites: a Google search, a ChatGPT
+conversation about the same thing and then two or three sites read in the following
+minutes. Fangio's constraints:
 
-- **Nada sale del equipo** (sin servidores ni APIs en la nube).
-- **Sin permisos de host para leer páginas**: sólo hay título, URL y fechas; no el contenido.
-- Debe funcionar con 10.000 referencias sin trabar el panel.
+- **Nothing leaves the computer** (no servers or cloud APIs).
+- **No host permissions to read pages**: only title, URL and dates are available, not the
+  content.
+- It must work with 10,000 references without freezing the panel.
 
-## Antecedentes
+## Prior work
 
-| Trabajo | Idea relevante | Qué tomamos |
+| Work | Relevant idea | What we took |
 |---|---|---|
-| Jones y Klinkner, *Beyond the session timeout* (CIKM 2008) | Segmentar consultas de búsqueda en tareas combinando rasgos léxicos y temporales; el corte por tiempo solo no alcanza. | Similitud léxica **modulada** por el tiempo, no reemplazada por él. |
-| Lucchese et al., *Identifying task-based sessions in search engine query logs* (WSDM 2011) | Las tareas se intercalan (cerca del 75 % de las consultas ocurre en multitarea); clustering con distancia léxica más tiempo entre consultas. | Grafo de pares con peso léxico por núcleo temporal; grupos que no son contiguos en el tiempo. |
-| Chang et al., *When the Tab Comes Due* (CHI 2021) y *Tabs.do* (UIST 2021) | Las pestañas se agrupan naturalmente por tarea; sugerencias a partir de señales de comportamiento y semánticas. | Señales de comportamiento: pestaña de origen (enlace seguido), grupo de Chrome, proyecto. |
-| Blondel et al., *Fast unfolding of communities in large networks* (2008) | Algoritmo de Louvain: maximiza modularidad, rápido en grafos dispersos. | Particionado del grafo de afinidad. |
-| Grootendorst, *BERTopic* (2022) | c-TF-IDF: términos distintivos de una clase frente al resto. | Nombres de los grupos. |
-| Mozilla, *How Firefox suggests tab groups with local AI* (2025) | Embeddings MiniLM locales y regresión logística para sugerir pestañas; T5 destilado (57 MB) para nombrar, alimentado con palabras clave c-TF-IDF. Señalan el **tiempo** como trabajo futuro. | Validó el enfoque c-TF-IDF y confirmó que el componente temporal es el aporte diferencial. |
-| Hisatomi (Univ. de Kioto), póster UIST 2025 | Detección de comunidades sobre el grafo de transiciones entre pestañas, sin entrenamiento. | Refuerza grafo y comunidades en lugar de clasificadores entrenados. |
-| Yan et al., *Biterm Topic Model* (WWW 2013); Yin y Wang, *GSDMM* (KDD 2014) | Modelos de tópicos para textos cortos. | Evaluados y descartados: piden fijar el número de tópicos, iteran por muestreo y no usan el tiempo. |
+| Jones and Klinkner, *Beyond the session timeout* (CIKM 2008) | Segment search queries into tasks by combining lexical and temporal features; a time cutoff alone is not enough. | Lexical similarity **modulated** by time, not replaced by it. |
+| Lucchese et al., *Identifying task-based sessions in search engine query logs* (WSDM 2011) | Tasks interleave (about 75 % of queries happen while multitasking); clustering with lexical distance plus time between queries. | Pair graph with lexical weight times a temporal kernel; groups that are not contiguous in time. |
+| Chang et al., *When the Tab Comes Due* (CHI 2021) and *Tabs.do* (UIST 2021) | Tabs naturally cluster by task; suggestions from behavioral and semantic signals. | Behavioral signals: opener tab (followed link), Chrome tab group, project. |
+| Blondel et al., *Fast unfolding of communities in large networks* (2008) | Louvain algorithm: maximizes modularity, fast on sparse graphs. | Partitioning of the affinity graph. |
+| Grootendorst, *BERTopic* (2022) | c-TF-IDF: terms that distinguish a class from the rest. | Group names. |
+| Mozilla, *How Firefox suggests tab groups with local AI* (2025) | Local MiniLM embeddings and logistic regression to suggest tabs; distilled T5 (57 MB) for naming, fed with c-TF-IDF keywords. They name **time** as future work. | Validated the c-TF-IDF approach and confirmed that the temporal component is the differentiating contribution. |
+| Hisatomi (Kyoto Univ.), UIST 2025 poster | Community detection on the graph of transitions between tabs, without training. | Reinforces graph and communities instead of trained classifiers. |
+| Yan et al., *Biterm Topic Model* (WWW 2013); Yin and Wang, *GSDMM* (KDD 2014) | Topic models for short texts. | Evaluated and discarded: they require fixing the number of topics, iterate by sampling and don't use time. |
 
-## Alternativas evaluadas
+## Alternatives evaluated
 
-| Opción | Ventajas | Costos | Decisión |
+| Option | Advantages | Costs | Decision |
 |---|---|---|---|
-| **Algorítmica** (TF-IDF, tiempo, estructura, Louvain, c-TF-IDF) | 0 bytes de modelo, determinista, explicable («en común: hooks ×4»), 10.000 referencias en unos 0,2 s, multilenguaje sin entrenamiento. | No entiende sinónimos ni traducciones («coche» y «auto»). | **Implementada** (siempre activa). |
-| **IA integrada de Chrome** (Gemini Nano, Prompt API, en el dispositivo) | Cero bytes en la extensión; Chrome gestiona el modelo; sin permisos nuevos; entiende el sentido de los títulos. | Requiere hardware compatible y una descarga única de varios GB hecha por Chrome; no está en todos los equipos. Sin API de embeddings. | **Opcional**: nombra los grupos y marca títulos que no pertenecen. |
-| Embeddings locales (MiniLM con Transformers.js u ONNX) | Similitud semántica real (sinónimos, idiomas). | De 23 MB (inglés) a unos 120 MB (multilingüe) por modelo, `wasm-unsafe-eval` en la CSP, descarga o empaquetado del modelo, CPU en equipos modestos (Firefox recibió quejas de consumo con su versión). | **No implementada** por ahora; el motor admite sumar una señal semántica más adelante. |
-| Modelos de tópicos para textos cortos (BTM, GSDMM) | Bien estudiados. | Número de tópicos fijo, no deterministas, sin componente temporal. | Descartada. |
+| **Algorithmic** (TF-IDF, time, structure, Louvain, c-TF-IDF) | 0 bytes of model, deterministic, explainable ("in common: hooks ×4"), 10,000 references in about 0.2 s, multilingual without training. | Doesn't understand synonyms or translations ("coche" and "auto"). | **Implemented** (always on). |
+| **Chrome built-in AI** (Gemini Nano, Prompt API, on device) | Zero bytes in the extension; Chrome manages the model; no new permissions; understands the meaning of titles. | Requires compatible hardware and a one-time download of several GB made by Chrome; not available on every computer. No embeddings API. | **Optional**: names groups and flags titles that don't belong. |
+| Local embeddings (MiniLM with Transformers.js or ONNX) | Real semantic similarity (synonyms, languages). | From 23 MB (English) to about 120 MB (multilingual) per model, `wasm-unsafe-eval` in the CSP, downloading or bundling the model, CPU on modest computers (Firefox got complaints about resource usage with its version). | **Not implemented** for now; the engine can add a semantic signal later. |
+| Topic models for short texts (BTM, GSDMM) | Well studied. | Fixed number of topics, non-deterministic, no temporal component. | Discarded. |
 
-## Diseño implementado
+## Implemented design
 
-### 1. Rasgos por referencia (`text.ts`)
+### 1. Per-reference features (`text.ts`)
 
-- **Título limpio**: se quitan contadores («(3) Bandeja…») y se parte en segmentos por
-  separadores (` - `, ` | `, ` · `…).
-- **Ruido de cada sitio, aprendido de los datos**: un segmento que aparece en al menos el
-  50 % (y 3 o más) de los títulos de un mismo dominio («Stack Overflow», «Mercado Libre»)
-  se descarta. El nombre del sitio (etiquetas del dominio: `react.dev` da «react») se
-  conserva con peso 0,3 y nunca nombra un grupo.
-- **Lo que buscaste**: la consulta se extrae de la URL de Google, Bing, DuckDuckGo, Yahoo,
-  Ecosia, Brave, YouTube, Amazon, Mercado Libre, GitHub, Stack Overflow y Wikipedia
-  (peso 1,3: es la intención más explícita).
-- **Palabras de la URL** (`/how-to-use-react-hooks`), peso 0,4, sin ids ni hashes.
-- Tokens en minúsculas y sin acentos, sin palabras vacías (es/en/pt), con un *stemming*
-  conservador común a los tres idiomas (plurales, `-iones`, `-ies`, gerundio inglés,
-  `reactjs` como `react`) y **bigramas sólo de palabras contiguas** («rodado 29»).
-- **Tipo de sitio**: búsqueda, chat con IA (ChatGPT, Claude, Gemini, Perplexity, Copilot…),
-  video o sitio.
+- **Clean title**: counters are removed ("(3) Bandeja…") and the title is split into
+  segments on separators (` - `, ` | `, ` · `…).
+- **Per-site noise, learned from the data**: a segment that appears in at least 50 % (and 3
+  or more) of the titles of the same domain ("Stack Overflow", "Mercado Libre") is
+  discarded. The site name (domain labels: `react.dev` gives "react") is kept with weight
+  0.3 and never names a group.
+- **What you searched for**: the query is extracted from the URL of Google, Bing,
+  DuckDuckGo, Yahoo, Ecosia, Brave, YouTube, Amazon, Mercado Libre, GitHub, Stack Overflow
+  and Wikipedia (weight 1.3: it is the most explicit intent).
+- **URL words** (`/how-to-use-react-hooks`), weight 0.4, without ids or hashes.
+- Lowercased, accent-free tokens, without stop words (es/en/pt), with conservative stemming
+  shared by the three languages (plurals, `-iones`, `-ies`, English gerund, `reactjs` as
+  `react`) and **bigrams of adjacent words only** ("rodado 29").
+- **Site type**: search, AI chat (ChatGPT, Claude, Gemini, Perplexity, Copilot…), video or
+  site.
 
-### 2. Grafo de afinidad (`engine.ts`)
+### 2. Affinity graph (`engine.ts`)
 
-TF-IDF por referencia (los términos de una sola referencia pesan la mitad: no conectan
-nada) y pares candidatos por índice invertido (sólo se comparan referencias que comparten
-algún término; las listas de más de 400 se ignoran por poco informativas). Peso de un par:
+TF-IDF per reference (terms found in a single reference weigh half: they connect nothing)
+and candidate pairs from an inverted index (only references that share some term are
+compared; posting lists longer than 400 are ignored as uninformative). Weight of a pair:
 
-    w = léxico · (0,45 + 0,55 · T) + 0,35 · origen + 0,25 · mismo grupo de Chrome + 0,20 · mismo proyecto
-    T = 0,65 · e^(−Δ / 45 min) + 0,35 · e^(−Δ / 3 días)
+    w = lexical · (0.45 + 0.55 · T) + 0.35 · opener + 0.25 · same Chrome group + 0.20 · same project
+    T = 0.65 · e^(−Δ / 45 min) + 0.35 · e^(−Δ / 3 days)
 
-`Δ` es la distancia mínima entre instantes de **actividad real** (apertura, último acceso).
-Las fechas masivas (foto inicial al instalar, archivado o reapertura en lote) se excluyen
-porque simularían coincidencias. Sin palabras en común sólo unen la pestaña de origen, el
-grupo de Chrome o el proyecto: **el tiempo solo nunca agrupa**. Se descartan los pesos
-menores a 0,1 y se conservan los 12 vecinos más fuertes de cada referencia.
+`Δ` is the minimum distance between instants of **real activity** (opening, last access).
+Bulk dates (initial snapshot on install, batch archiving or reopening) are excluded because
+they would fake coincidences. Without shared words, only the opener tab, the Chrome group or
+the project link references: **time alone never groups**. Weights below 0.1 are discarded
+and the 12 strongest neighbors of each reference are kept.
 
-### 3. Comunidades y nombres
+### 3. Communities and names
 
-- **Louvain** determinista (mismo resultado para la misma entrada). Las comunidades de más
-  de 50 se vuelven a partir con una resolución mayor. Las de menos de 3 se descartan, salvo
-  que una referencia suelta tenga al menos el 60 % de su peso (y 0,25 o más) hacia un
-  grupo: entonces se suma a él.
-- **Nombre** por c-TF-IDF: términos presentes en al menos el 25 % del grupo y raros en el
-  resto; se eligen hasta 3 que no se solapen, con la forma escrita más frecuente
-  (prefiriendo mayúsculas: «React» antes que «react»).
-- **Afinidad** (0 a 1): 50 % conductancia (peso interno frente a enlaces hacia afuera),
-  30 % peso medio interno, 20 % densidad.
-- **Recorrido**: miembros en orden cronológico con su tipo (búsqueda, IA, video, sitio).
-- Orden de las sugerencias: afinidad por tamaño por recencia (vida media de 14 días).
+- Deterministic **Louvain** (same result for the same input). Communities larger than 50
+  are split again with a higher resolution. Those smaller than 3 are discarded, unless a
+  loose reference has at least 60 % of its weight (and 0.25 or more) toward a group: then it
+  joins it.
+- **Name** by c-TF-IDF: terms present in at least 25 % of the group and rare in the rest; up
+  to 3 non-overlapping ones are chosen, with the most frequent written form (preferring
+  capitalized: "React" over "react").
+- **Affinity** (0 to 1): 50 % conductance (internal weight versus outgoing links), 30 %
+  mean internal weight, 20 % density.
+- **Path**: members in chronological order with their type (search, AI, video, site).
+- Suggestion order: affinity × size × recency (14-day half-life).
 
-### 4. IA local opcional (`localAi.ts`)
+### 4. Optional local AI (`localAi.ts`)
 
-Si `LanguageModel` existe y el equipo califica, el botón **Nombrar con IA local** envía a
-Gemini Nano, en el dispositivo, las palabras clave y hasta 10 títulos de cada grupo, con
-la salida restringida por JSON Schema (`name`, `outliers`). Los índices devueltos se
-validan y la IA nunca puede «sacar» más de la mitad de un grupo. Si Chrome todavía no
-descargó el modelo, se pide confirmación explícita antes de iniciar la descarga.
+If `LanguageModel` exists and the computer qualifies, the **Nombrar con IA local** (Name
+with local AI) button sends Gemini Nano, on the device, the keywords and up to 10 titles of
+each group, with the output constrained by a JSON Schema (`name`, `outliers`). The returned
+indexes are validated and the AI can never "remove" more than half of a group. If Chrome
+hasn't downloaded the model yet, explicit confirmation is requested before starting the
+download.
 
-## Resultados
+## Results
 
-- Pruebas unitarias (`tests/context.test.ts`): búsqueda, ChatGPT y 3 sitios agrupados sin
-  ruido; ruido de sitio aprendido (dos temas en Stack Overflow no se mezclan); el tiempo
-  solo no agrupa; una cadena de pestañas de origen sin palabras comunes sí; determinismo;
-  10.000 referencias en unos 0,2 s con grupos puros.
-- E2E en Chromium real (`npm run test:e2e:views`): ver
-  [TESTING.md](TESTING.md#vistas-y-análisis-contextual-v11).
+- Unit tests (`tests/context.test.ts`): search, ChatGPT and 3 sites grouped without noise;
+  site noise learned (two topics on Stack Overflow don't mix); time alone doesn't group; a
+  chain of opener tabs with no shared words does; determinism; 10,000 references in about
+  0.2 s with pure groups.
+- E2E in real Chromium (`npm run test:e2e:views`): see
+  [TESTING.md](TESTING.md#views-and-contextual-analysis-v11).
 
-## Limitaciones
+## Limitations
 
-- Sin contenido de página: dos títulos sin palabras en común sólo se unen por estructura
-  (pestaña de origen, grupo, proyecto).
-- Sinónimos y traducciones no se reconocen sin una capa semántica.
-- Tras reiniciar el navegador, «último acceso» puede reflejar la restauración de la sesión.
-- Las preferencias de la vista (sugerencias descartadas, nombres) viven en este navegador
-  (`localStorage`), no en la base ni en las copias.
+- No page content: two titles with no shared words are only joined by structure (opener
+  tab, group, project).
+- Synonyms and translations are not recognized without a semantic layer.
+- After restarting the browser, "last accessed" may reflect the session restore.
+- The view's preferences (dismissed suggestions, names) live in this browser
+  (`localStorage`), not in the database or in backups.
 
-## Referencias
+## References
 
 - R. Jones, K. L. Klinkner. *Beyond the session timeout: automatic hierarchical segmentation of search topics in query logs*. CIKM 2008.
 - C. Lucchese, S. Orlando, R. Perego, F. Silvestri, G. Tolomei. *Identifying task-based sessions in search engine query logs*. WSDM 2011. https://doi.org/10.1145/1935826.1935875
@@ -124,4 +126,4 @@ descargó el modelo, se pide confirmación explícita antes de iniciar la descar
 - X. Yan, J. Guo, Y. Lan, X. Cheng. *A Biterm Topic Model for Short Texts*. WWW 2013.
 - J. Yin, J. Wang. *A Dirichlet Multinomial Mixture Model-based Approach for Short Text Clustering*. KDD 2014.
 - Mozilla. *Under the hood: How Firefox suggests tab groups with local AI*. 2025. https://blog.mozilla.org/en/mozilla/ai/ai-tech/ai-tab-groups/
-- Chrome for Developers. *Prompt API* (extensiones). https://developer.chrome.com/docs/extensions/ai/prompt-api
+- Chrome for Developers. *Prompt API* (extensions). https://developer.chrome.com/docs/extensions/ai/prompt-api

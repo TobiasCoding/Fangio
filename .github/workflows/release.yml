@@ -18,7 +18,7 @@ env:
 
 jobs:
   release:
-    name: Publicar release
+    name: Publish release
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -31,11 +31,11 @@ jobs:
         with:
           node-version: 24
 
-      - name: Verificar que la etiqueta coincide con package.json
+      - name: Check that the tag matches package.json
         run: |
           version="$(node -p "require('./package.json').version")"
           if [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
-            echo "::error::La etiqueta ${GITHUB_REF_NAME} no coincide con la versión de package.json (v${version})."
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match the package.json version (v${version})."
             exit 1
           fi
           echo "VERSION=${version}" >> "$GITHUB_ENV"
@@ -44,7 +44,7 @@ jobs:
       - run: npm run typecheck
       - run: npm test
 
-      - name: Compilar y empaquetar
+      - name: Build and package
         run: |
           # Reproducible zip timestamps: the tagged commit's date.
           export SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"
@@ -53,7 +53,7 @@ jobs:
           test -f release/SHA256SUMS.txt
           cat release/SHA256SUMS.txt
 
-      - name: Crear el release en GitHub
+      - name: Create the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -63,18 +63,18 @@ jobs:
           if node scripts/changelog-notes.mjs "$VERSION" > release-notes.md; then
             echo >> release-notes.md
           else
-            echo "No hay notas para ${VERSION} en CHANGELOG.md; se generan automáticamente."
+            echo "No notes for ${VERSION} in CHANGELOG.md; generating them automatically."
             : > release-notes.md
             args+=(--generate-notes)
           fi
           cat >> release-notes.md <<NOTES
           ---
 
-          **Instalación:** descargá \`fangio-v${VERSION}.zip\`, extraelo en una carpeta permanente y cargalo en \`chrome://extensions\` con «Cargar descomprimida» ([guía](https://github.com/${GITHUB_REPOSITORY}/blob/main/docs/INSTALL.md)).
+          **Install:** download \`fangio-v${VERSION}.zip\`, extract it into a permanent folder and load it in \`chrome://extensions\` with **Load unpacked** ([guide](https://github.com/${GITHUB_REPOSITORY}/blob/main/docs/INSTALL.md)).
 
-          **Actualización:** ejecutá \`update.cmd\` (Windows) o \`update.sh\` dentro de la carpeta instalada y tocá «Recargar» en Fangio. Tus datos se conservan.
+          **Update:** run \`update.cmd\` (Windows) or \`update.sh\` inside the installed folder and click **Reload** on Fangio. Your data is kept.
 
-          SHA-256 de \`fangio-v${VERSION}.zip\`: \`${sha}\`
+          SHA-256 of \`fangio-v${VERSION}.zip\`: \`${sha}\`
           NOTES
           args+=(--notes-file release-notes.md)
           gh release create "$GITHUB_REF_NAME" "$zip" release/SHA256SUMS.txt "${args[@]}"

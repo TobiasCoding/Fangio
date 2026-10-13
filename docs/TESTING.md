@@ -1,10 +1,10 @@
-# Pruebas de Fangio
+# Testing Fangio
 
-Este documento explica cómo correr las pruebas unitarias y la batería end-to-end (e2e) en un
-navegador real, qué cubre cada escenario, los resultados **medidos** en una corrida concreta y
-las limitaciones conocidas. Los números medidos están separados de las estimaciones.
+This document explains how to run the unit tests and the end-to-end (e2e) suite in a real
+browser, what each scenario covers, the results **measured** in a specific run and the known
+limitations. Measured numbers are kept separate from estimates.
 
-## Pruebas unitarias
+## Unit tests
 
 ```bash
 npm ci
@@ -12,272 +12,273 @@ npm run typecheck      # tsc -p . --noEmit
 npm test               # vitest run (fake chrome.* + fake-indexeddb)
 ```
 
-Cubren la lógica pura y el servicio de fondo completo contra un `chrome.*` falso
-(`tests/helpers/fakeChrome.ts`): pipeline de cierre, interrupciones en cada fase (`testHooks.checkpoint`),
-reinicios del navegador, reglas, duplicados, copias, protecciones.
+They cover the pure logic and the whole background service against a fake `chrome.*`
+(`tests/helpers/fakeChrome.ts`): close pipeline, interruptions at every phase
+(`testHooks.checkpoint`), browser restarts, rules, duplicates, backups, protections.
 
-## Pruebas e2e en navegador real
+## E2E tests in a real browser
 
 ```bash
-npm run build                    # el harness también compila antes de empezar (--no-build lo evita)
-npm run test:e2e                 # todos los escenarios, 820 pestañas (~17 min en la máquina medida)
-node e2e/run.mjs --list          # lista de escenarios
+npm run build                    # the harness also builds before starting (--no-build skips it)
+npm run test:e2e                 # all scenarios, 820 tabs (~17 min on the measured machine)
+node e2e/run.mjs --list          # list of scenarios
 node e2e/run.mjs --only s1,s2 --tabs 200
 node e2e/run.mjs --only s4 --tabs 400 --kill-at middle
-node e2e/run.mjs --quick         # omite las esperas del período de gracia (3 min) en S3/S4
+node e2e/run.mjs --quick         # skips the grace-period waits (3 min) in S3/S4
 ```
 
-Opciones: `--only <ids>` (las dependencias se agregan solas: S2 necesita S1, etc.),
-`--tabs N` (por defecto 820), `--headed` (ventanas reales fuera de pantalla), `--quick`,
+Options: `--only <ids>` (dependencies are added automatically: S2 needs S1, etc.),
+`--tabs N` (820 by default), `--headed` (real off-screen windows), `--quick`,
 `--keep-profiles`, `--no-build`, `--kill-at early,middle,late`.
 
-Requisitos: Node ≥ 20 y el Chromium de Playwright descargado (`npx playwright install chromium`;
-hace falta el navegador completo, no el *headless shell*, porque las extensiones no funcionan en
-este último). Probado en Windows; la medición de memoria (S8) usa `Win32_Process` y sólo
-funciona en Windows.
+Requirements: Node ≥ 20 and Playwright's Chromium downloaded
+(`npx playwright install chromium`; the full browser is needed, not the *headless shell*,
+because extensions don't work in the latter). Tested on Windows; the memory measurement
+(S8) uses `Win32_Process` and only works on Windows.
 
-Resultados: `e2e/.results/<fecha>/results.json` (y `e2e/.results/latest.json`). Perfiles
-temporales: `e2e/.profiles/` (se borran al terminar salvo `--keep-profiles`). Ambos están en
-`.gitignore`. **El harness nunca usa el Chrome ni el perfil del usuario**: lanza el Chromium de
-Playwright con `--user-data-dir` propio.
+Results: `e2e/.results/<date>/results.json` (and `e2e/.results/latest.json`). Temporary
+profiles: `e2e/.profiles/` (deleted at the end unless `--keep-profiles`). Both are in
+`.gitignore`. **The harness never uses the user's Chrome or profile**: it launches
+Playwright's Chromium with its own `--user-data-dir`.
 
-### Cómo funciona
+### How it works
 
-- `e2e/lib/server.mjs`: servidor HTTP local en `127.0.0.1` (puerto aleatorio) con páginas
-  `/p/<n>?q=..` («Página n»), `/` (para la regla de URL exacta), `/audio` (tono en bucle) y favicon.
-- `e2e/helper-ext/`: extensión **de prueba** (no se distribuye) con permisos `tabs`/`tabGroups`
-  que crea las pestañas por lotes, las agrupa/fija, y registra eventos de pestañas (para medir
-  la concurrencia de reapertura desde fuera de Fangio).
-- `e2e/lib/fixtures.mjs`: arma el «navegador del usuario»: N pestañas en 4 ventanas
-  (50/30/15/5 %), 4 fijadas, 3 grupos («Trabajo», «Lectura», «Compras»), duplicados exactos,
-  casi-duplicados (`?q=a`, `?q=b`, `#sec`), 3 pestañas `/`, 4 pestañas en `localhost`
-  (sitio excluido), 1 pestaña con audio. Después **reinicia** el navegador: la restauración de
-  sesión deja la gran mayoría de las pestañas **sin cargar** (como un perfil real de larga
-  duración). Ese perfil se usa como plantilla (se copia) en S1 y S4.
-- `e2e/lib/cdp.mjs`, `browser.mjs`, `page.mjs`: Chromium se lanza como proceso hijo (así se
-  conoce su PID y se puede matar el árbol completo) y se maneja por **CDP directo**. Playwright
-  sólo se usa para ubicar el binario: `connectOverCDP` se adjunta a todas las pestañas y con
-  ~800 pestañas excede su tiempo de espera. La UI se maneja con eventos de entrada reales
+- `e2e/lib/server.mjs`: local HTTP server on `127.0.0.1` (random port) with pages
+  `/p/<n>?q=..` ("Página n"), `/` (for the exact-URL rule), `/audio` (looping tone) and a
+  favicon.
+- `e2e/helper-ext/`: a **test** extension (not distributed) with `tabs`/`tabGroups`
+  permissions that creates the tabs in batches, groups/pins them, and records tab events (to
+  measure reopen concurrency from outside Fangio).
+- `e2e/lib/fixtures.mjs`: builds the "user's browser": N tabs in 4 windows (50/30/15/5 %), 4
+  pinned, 3 groups ("Trabajo", "Lectura", "Compras"), exact duplicates, near-duplicates
+  (`?q=a`, `?q=b`, `#sec`), 3 `/` tabs, 4 tabs on `localhost` (excluded site), 1 tab with
+  audio. Then it **restarts** the browser: session restore leaves the vast majority of tabs
+  **unloaded** (like a real long-lived profile). That profile is used as a template (copied)
+  in S1 and S4.
+- `e2e/lib/cdp.mjs`, `browser.mjs`, `page.mjs`: Chromium is launched as a child process (so
+  its PID is known and the whole tree can be killed) and driven through **direct CDP**.
+  Playwright is only used to locate the binary: `connectOverCDP` attaches to every tab and
+  with ~800 tabs exceeds its timeout. The UI is driven with real input events
   (`Input.dispatchMouseEvent`/`dispatchKeyEvent`/`insertText`).
-- Lectura del estado: se evalúa código de **solo lectura** en el service worker de Fangio
-  (o en una página de Fangio si el worker no arranca): `chrome.tabs.query`, `storage.session`
-  e IndexedDB `fangio` (sólo si ya existe: nunca se crea la base desde el harness).
-- Instalación con pestañas existentes: método que funcionó → **CDP `Extensions.loadUnpacked`**
-  sobre el navegador en marcha (requiere `--enable-unsafe-extension-debugging`). Chromium no
-  persiste esas extensiones entre reinicios, así que los relanzamientos cargan el mismo `dist/`
-  con `--load-extension` (el manifiesto no tiene `key`: el id depende de la carpeta, y como es el
-  mismo `dist/` el id y la IndexedDB son los mismos; el harness lo descubre en tiempo de
-  ejecución buscando el service worker cuyo manifiesto se llama «Fangio»).
+- Reading state: **read-only** code is evaluated in Fangio's service worker (or in a Fangio
+  page if the worker doesn't start): `chrome.tabs.query`, `storage.session` and the `fangio`
+  IndexedDB (only if it already exists: the harness never creates the database).
+- Installing with existing tabs: the method that worked → **CDP `Extensions.loadUnpacked`**
+  on the running browser (requires `--enable-unsafe-extension-debugging`). Chromium doesn't
+  persist those extensions across restarts, so relaunches load the same `dist/` with
+  `--load-extension` (the manifest has no `key`: the id depends on the folder, and since it
+  is the same `dist/` the id and the IndexedDB are the same; the harness discovers it at
+  runtime by looking for the service worker whose manifest is named "Fangio").
 
-### Invariantes globales (después de cada escenario)
+### Global invariants (after each scenario)
 
-1. Toda URL de la pestaña original tiene una pestaña abierta con esa URL exacta **o** un registro
-   con esa URL exacta (en cualquier estado).
-2. Sin inflación: registros ≤ pestañas originales + pestañas creadas por la prueba; y por URL,
-   registros ≤ instancias de pestaña con esa URL.
-3. Toda pestaña abierta rastreable tiene **exactamente un** registro `open` vinculado en la sesión
-   actual. (En S4, dentro del período de gracia, se admiten pestañas sin vincular a propósito
-   cuando su URL pertenece a un cierre interrumpido todavía diferido; se informan aparte).
+1. Every URL of the original tabs has an open tab with that exact URL **or** a record with
+   that exact URL (in any state).
+2. No inflation: records ≤ original tabs + tabs created by the test; and per URL, records ≤
+   tab instances with that URL.
+3. Every open trackable tab has **exactly one** `open` record linked in the current session.
+   (In S4, within the grace period, unlinked tabs are deliberately allowed when their URL
+   belongs to an interrupted close that is still deferred; they are reported separately.)
 
-## Escenarios y resultado de la corrida completa
+## Scenarios and full-run results
 
-Corrida completa: `npm run test:e2e` (820 pestañas, sin `--quick`), 2026-10-10, duración total
-≈ 16,5 min. **9/9 PASS** (80 comprobaciones, 0 fallidas). Antes de las correcciones, S4 había fallado
-(ver «Errores encontrados y corregidos»).
+Full run: `npm run test:e2e` (820 tabs, without `--quick`), 2026-10-10, total duration
+≈ 16.5 min. **9/9 PASS** (80 checks, 0 failed). Before the fixes, S4 had failed (see
+"Bugs found and fixed").
 
-| # | Escenario | Qué verifica | Resultado |
+| # | Scenario | What it verifies | Result |
 |---|---|---|---|
-| S1 | Instalación con pestañas existentes | Fangio se carga (CDP `Extensions.loadUnpacked`) en un navegador que ya tiene 820 pestañas en 4 ventanas (fijadas, grupos, audio, casi todas sin cargar). Un registro `open` por pestaña (`install-snapshot`), duplicados exactos con registros separados, títulos de grupo en `origin`, entrada `install-snapshot` en el registro | PASS |
-| S2 | Asistente de importación por la UI | `#/importar`: el conteo de la vista previa coincide con las protecciones reales (fijadas/activas/audio/sitio excluido se mantienen); se protegen 3 filas con el checkbox; «Confirmar» → «Aplicar»; quedan abiertas sólo las esperadas; los archivados conservan URL, título, ventana/índice y grupo; el navegador nunca queda sin pestañas; acción deshacible | PASS |
-| S9 | Duplicados | URL idéntica → registros separados (S1); «Fusionar en este» en `#/duplicados` (las otras van a papelera, nada se borra); «Deshacer» desde `#/registro` restaura estados y `mergedFrom` | PASS |
-| S5 | Reabrir 50 desde la UI | Selección con teclado (Mayús+↓ ×49) en «Archivadas» → «Reabrir» → confirmación; la concurrencia observada desde otra extensión nunca supera `reopenConcurrency`; los mismos ids pasan a `open`; re-archivar y «Deshacer» conservan ids; ningún registro nuevo | PASS |
-| S3 | Reinicio del navegador | Cierre ordenado (CDP `Browser.close`) y relanzamiento con restauración de sesión: archivo intacto (mismos ids/URLs), pestañas restauradas re-vinculadas a los **mismos** ids, sin registros nuevos; los registros de una ventana cerrada antes del reinicio siguen `open` durante la gracia y recién después se archivan (`window-closed`), nunca a papelera; el panel carga | PASS |
-| S4 | Corte duro durante un archivado masivo | Archivar las 820 y matar el árbol de procesos (`taskkill /F /T`) en 3 momentos (diario escrito / 50 % cerradas / 95 % cerradas); relanzar; sin pérdidas ni duplicados; diario reanudado/abortado según la especificación | PASS (tras corregir 2 errores) |
-| S6 | Automatización | Objetivo 15, regla de URL exacta `http://127.0.0.1:<puerto>/` → papelera a los 0 min, tope 20 por ejecución, 2 protegidas, 2 fijadas, 2 en sitio excluido; vista previa = resultado; protecciones nunca cerradas; tope respetado; `/?model=x` y `/#frag` no coinciden con la regla; motivos registrados por regla | PASS |
-| S7 | Escala UI (10.000 registros) | Importar copia JSON sintética desde `#/copias` (input de archivo real), carga del panel, latencia de búsqueda, scroll virtualizado con rueda real hasta el final, exportación JSON (descarga real) e ida y vuelta (reimportar: 0 nuevas, 0 actualizadas) | PASS |
-| S8 | Recursos | Memoria del árbol de procesos en cada fase, proceso de extensión de Fangio, heap JS del panel | PASS (informativo) |
+| S1 | Install with existing tabs | Fangio is loaded (CDP `Extensions.loadUnpacked`) into a browser that already has 820 tabs in 4 windows (pinned, groups, audio, almost all unloaded). One `open` record per tab (`install-snapshot`), exact duplicates with separate records, group titles in `origin`, an `install-snapshot` entry in the log | PASS |
+| S2 | Import wizard through the UI | `#/importar`: the preview count matches the real protections (pinned/active/audio/excluded site are kept); 3 rows are protected with the checkbox; "Confirmar" → "Aplicar"; only the expected tabs stay open; archived records keep URL, title, window/index and group; the browser is never left without tabs; undoable action | PASS |
+| S9 | Duplicates | Identical URL → separate records (S1); "Fusionar en este" in `#/duplicados` (the others go to the trash, nothing is deleted); "Deshacer" from `#/registro` restores states and `mergedFrom` | PASS |
+| S5 | Reopen 50 from the UI | Keyboard selection (Shift+↓ ×49) in "Archivadas" → "Reabrir" → confirmation; the concurrency observed from another extension never exceeds `reopenConcurrency`; the same ids become `open`; re-archiving and "Deshacer" keep ids; no new records | PASS |
+| S3 | Browser restart | Orderly shutdown (CDP `Browser.close`) and relaunch with session restore: archive intact (same ids/URLs), restored tabs relinked to the **same** ids, no new records; records of a window closed before the restart stay `open` during the grace period and only afterwards are archived (`window-closed`), never to the trash; the panel loads | PASS |
+| S4 | Hard kill during a bulk archive | Archive all 820 and kill the process tree (`taskkill /F /T`) at 3 moments (journal written / 50 % closed / 95 % closed); relaunch; no losses or duplicates; journal resumed/aborted according to the spec | PASS (after fixing 2 bugs) |
+| S6 | Automation | Target 15, exact-URL rule `http://127.0.0.1:<port>/` → trash after 0 min, cap of 20 per run, 2 protected, 2 pinned, 2 on an excluded site; preview = result; protections never closed; cap respected; `/?model=x` and `/#frag` don't match the rule; reasons recorded per rule | PASS |
+| S7 | UI scale (10,000 records) | Import a synthetic JSON backup from `#/copias` (real file input), panel load, search latency, virtualized scrolling with a real wheel to the end, JSON export (real download) and round trip (reimport: 0 new, 0 updated) | PASS |
+| S8 | Resources | Process tree memory at each phase, Fangio's extension process, panel JS heap | PASS (informational) |
 
-## Números MEDIDOS
+## MEASURED numbers
 
-**Máquina:** Intel Core i7-12700K (12 núcleos / 20 hilos), 32 GB de RAM, Windows 11 Pro.
-**Navegador:** Chromium 156.0.8078.4 de Playwright 1.64 (`chromium-1248`), `--headless=new`,
-salida de audio falsa (`--disable-audio-output`). Una sola corrida en esta máquina; otras
-máquinas (y Chrome estable) darán otros valores. Tiempos de pared medidos desde el harness
-(incluyen la latencia de CDP y del sondeo, típicamente 10–100 ms).
+**Machine:** Intel Core i7-12700K (12 cores / 20 threads), 32 GB of RAM, Windows 11 Pro.
+**Browser:** Chromium 156.0.8078.4 from Playwright 1.64 (`chromium-1248`), `--headless=new`,
+fake audio output (`--disable-audio-output`). A single run on this machine; other machines
+(and stable Chrome) will give other values. Wall-clock times measured from the harness
+(they include CDP and polling latency, typically 10–100 ms).
 
-| Medición | Valor |
+| Measurement | Value |
 |---|---|
-| Crear la plantilla (820 pestañas, carga + descarte) / restaurarla | 26,7 s / 7,8 s |
+| Create the template (820 tabs, load + discard) / restore it | 26.7 s / 7.8 s |
 | S1: `Extensions.loadUnpacked` | 67 ms |
-| S1: instalación → 820 registros `open` vinculados | **391 ms** |
-| S2: vista previa de importación visible (820 filas) | 255 ms |
-| S2: «Aplicar» → «Importación lista» (805 archivadas + 3 protegidas) | **9,7 s** (≈ 83 pestañas/s) |
-| S2: Fangio estable tras aplicar | +1,5 s |
-| S5: reabrir 50 → todas vinculadas / operación terminada | 2,1 s / 2,2 s |
-| S5: máximo de pestañas cargando a la vez (`reopenConcurrency` = 3) | 3 |
-| S5: re-archivar 50 / deshacer (reabre 50) | 0,6 s / 2,0 s |
-| S3: cierre ordenado / relanzar hasta tener las pestañas / Fangio estable | 0,6 s / 0,5 s / +1,6 s |
-| S3: panel cargado tras reiniciar | 90 ms |
-| S3: barrido de arranque (ventana cerrada → `archived`) | 185 s tras el arranque (gracia 180 s + 5 s) |
-| S6: vista previa / ejecución (20 cierres) | 4 ms / 211 ms |
-| S7: importar 10.000 registros desde `#/copias` | 1,1 s |
-| S7: carga del panel `#/lista` con 10.001 registros (3 recargas) | 251 / 236 / 344 ms |
-| S7: búsqueda hasta que la lista cambia (incluye debounce de 120 ms): exacta / amplia (2.500) / sin resultados | 164 / 150 / 153 ms |
-| S7: scroll con rueda hasta el final de 9.501 filas | máx. 40 filas en el DOM; mayor hueco entre frames 34 ms |
-| S7: heap JS del panel con 10.001 registros | 19 MB |
-| S7: exportar JSON (5,5 MB, descarga real) / reimportar el mismo archivo | 0,7 s / 1,6 s |
+| S1: install → 820 linked `open` records | **391 ms** |
+| S2: import preview visible (820 rows) | 255 ms |
+| S2: "Aplicar" → "Importación lista" (805 archived + 3 protected) | **9.7 s** (≈ 83 tabs/s) |
+| S2: Fangio idle after applying | +1.5 s |
+| S5: reopen 50 → all linked / operation finished | 2.1 s / 2.2 s |
+| S5: maximum tabs loading at once (`reopenConcurrency` = 3) | 3 |
+| S5: re-archive 50 / undo (reopens 50) | 0.6 s / 2.0 s |
+| S3: orderly shutdown / relaunch until tabs are present / Fangio idle | 0.6 s / 0.5 s / +1.6 s |
+| S3: panel loaded after restart | 90 ms |
+| S3: startup sweep (closed window → `archived`) | 185 s after startup (180 s grace + 5 s) |
+| S6: preview / run (20 closes) | 4 ms / 211 ms |
+| S7: import 10,000 records from `#/copias` | 1.1 s |
+| S7: load of the `#/lista` panel with 10,001 records (3 reloads) | 251 / 236 / 344 ms |
+| S7: search until the list changes (includes a 120 ms debounce): exact / broad (2,500) / no results | 164 / 150 / 153 ms |
+| S7: wheel scroll to the end of 9,501 rows | max. 40 rows in the DOM; largest gap between frames 34 ms |
+| S7: panel JS heap with 10,001 records | 19 MB |
+| S7: export JSON (5.5 MB, real download) / reimport the same file | 0.7 s / 1.6 s |
 
-### S4 — corte duro (820 pestañas)
+### S4 — hard kill (820 tabs)
 
-| Momento del corte | Primer arranque tras el corte | Arranque siguiente, dentro de la gracia | Tras la gracia (barrido) |
+| Kill moment | First start after the kill | Next start, within the grace period | After the grace period (sweep) |
 |---|---|---|---|
-| *early*: 145 ms tras enviar «archivar 820», diario escrito, 0 cerradas | 820 pestañas restauradas; el worker de Fangio no arranca (ver Limitaciones); datos intactos | 820 registros con `pendingClose`, 820 pestañas sin vincular a propósito (diferido) | **820 abiertas** (cierre abortado: las pestañas siguen), 0 pendientes, 0 duplicados |
-| *middle*: 6,4 s, 425 cerradas | el navegador restauró 683 pestañas (incluye 288 que ya estaban cerradas) | 129 con `pendingClose` diferido | **683 abiertas** (mismos ids) + **137 archivadas**; 0 pérdidas, 0 duplicados |
-| *late*: 10,3 s, 800 cerradas | el navegador restauró 451 | 359 con `pendingClose` diferido | **451 abiertas** + **369 archivadas**; 0 pérdidas, 0 duplicados |
+| *early*: 145 ms after sending "archive 820", journal written, 0 closed | 820 tabs restored; Fangio's worker doesn't start (see Limitations); data intact | 820 records with `pendingClose`, 820 deliberately unlinked tabs (deferred) | **820 open** (close aborted: the tabs remain), 0 pending, 0 duplicates |
+| *middle*: 6.4 s, 425 closed | the browser restored 683 tabs (including 288 that were already closed) | 129 with deferred `pendingClose` | **683 open** (same ids) + **137 archived**; 0 losses, 0 duplicates |
+| *late*: 10.3 s, 800 closed | the browser restored 451 | 359 with deferred `pendingClose` | **451 open** + **369 archived**; 0 losses, 0 duplicates |
 
-En una corrida previa con 400 pestañas, el corte *late* llegó **después** de la escritura final
-(400 archivadas, sin `pendingClose`) y el navegador igual restauró 141 de esas pestañas: con la
-corrección de la regla 4b se re-vincularon a los mismos 141 registros (sin la corrección: 368
-registros duplicados en el mismo escenario).
+In an earlier run with 400 tabs, the *late* kill came **after** the final write (400
+archived, no `pendingClose`) and the browser still restored 141 of those tabs: with the
+rule 4b fix they were relinked to the same 141 records (without the fix: 368 duplicate
+records in the same scenario).
 
-### S8 — memoria del árbol de procesos de Chromium
+### S8 — Chromium process tree memory
 
-| Fase | Procesos | Working set | Privada |
+| Phase | Processes | Working set | Private |
 |---|---|---|---|
-| 820 pestañas restauradas (5 cargadas, resto `unloaded`), sin Fangio | 14 | 1.224 MB | 892 MB |
-| Tras el snapshot de instalación | 19 | 1.492 MB | 1.019 MB |
-| Antes de archivar (panel abierto) | 22 | 1.701 MB | 1.133 MB |
-| Después de archivar 805 | 25 | 1.810 MB | 1.171 MB |
-| Tras reiniciar con 15 pestañas abiertas | 12 | 799 MB | 503 MB |
+| 820 tabs restored (5 loaded, the rest `unloaded`), without Fangio | 14 | 1,224 MB | 892 MB |
+| After the install snapshot | 19 | 1,492 MB | 1,019 MB |
+| Before archiving (panel open) | 22 | 1,701 MB | 1,133 MB |
+| After archiving 805 | 25 | 1,810 MB | 1,171 MB |
+| After restarting with 15 open tabs | 12 | 799 MB | 503 MB |
 
-- Proceso de extensión de Fangio (service worker) tras el snapshot de 820: **72 MB** de working
-  set; con el panel abierto llegó a ~110 MB (59 MB privados). Heap JS del panel con ~820
-  registros: 3,9 MB.
-- Archivar **no** bajó la memoria durante la sesión: las pestañas cerradas ya estaban sin cargar
-  (`unloaded` por la restauración de sesión; no `discarded`) y, mientras tanto, Chromium siguió
-  cargando pestañas restauradas en segundo plano (7 → 17 renderizadores). El ahorro aparece en el
-  siguiente arranque: 799 MB con 15 pestañas frente a 1,2–1,8 GB con 820.
-- La suma de working sets cuenta dos veces las páginas compartidas; «Privada» es más representativa.
-- Al **crear** la plantilla, cargar y luego descartar 820 pestañas sin límite de procesos dejó ~820
-  renderizadores vivos (~17 GB privados): `chrome.tabs.discard` no liberó los procesos en este
-  build. Por eso la plantilla se arma con `--renderer-process-limit=6` y se reinicia.
+- Fangio's extension process (service worker) after the 820-tab snapshot: **72 MB** working
+  set; with the panel open it reached ~110 MB (59 MB private). Panel JS heap with ~820
+  records: 3.9 MB.
+- Archiving did **not** lower memory during the session: the closed tabs were already
+  unloaded (`unloaded` from session restore; not `discarded`) and, meanwhile, Chromium kept
+  loading restored tabs in the background (7 → 17 renderers). The savings show up on the
+  next start: 799 MB with 15 tabs versus 1.2–1.8 GB with 820.
+- The sum of working sets double-counts shared pages; "Private" is more representative.
+- When **creating** the template, loading and then discarding 820 tabs without a process
+  limit left ~820 renderers alive (~17 GB private): `chrome.tabs.discard` didn't free the
+  processes in this build. That is why the template is built with
+  `--renderer-process-limit=6` and restarted.
 
-## Vistas y análisis contextual (v1.1)
+## Views and contextual analysis (v1.1)
 
 ```bash
-npm run test:e2e:views           # compila, ~1 min; capturas en e2e/.results/views/
+npm run test:e2e:views           # builds, ~1 min; screenshots in e2e/.results/views/
 node e2e/views.mjs --headed --no-build
 ```
 
-Navegador aislado igual que la batería principal (Chromium de Playwright, perfil temporal).
-Todos los nombres de host se resuelven a un servidor HTTPS local
-(`--host-resolver-rules`, certificado autofirmado descartable creado con `openssl`,
-`--ignore-certificate-errors`): «google.com», «chatgpt.com» o «react.dev» son páginas de
-prueba locales y **nada sale a la red** (HTTPS porque esos dominios tienen HSTS precargado).
-La extensión se carga desde una copia de `dist/` con el permiso opcional `<all_urls>` ya
-concedido, porque el diálogo de permisos del navegador no se puede aceptar por automatización.
+Isolated browser like the main suite (Playwright's Chromium, temporary profile). All host
+names resolve to a local HTTPS server (`--host-resolver-rules`, a disposable self-signed
+certificate created with `openssl`, `--ignore-certificate-errors`): "google.com",
+"chatgpt.com" or "react.dev" are local test pages and **nothing goes out to the network**
+(HTTPS because those domains are HSTS-preloaded). The extension is loaded from a copy of
+`dist/` with the optional `<all_urls>` permission already granted, because the browser's
+permission dialog can't be accepted through automation.
 
-Escenario: 14 pestañas abiertas de a una y vistas 2,7 s cada una — una búsqueda de Google
-sobre hooks de React seguida de una conversación de ChatGPT y tres sitios (abiertos desde la
-búsqueda, con `openerTabId`), una búsqueda de bicicletas con tienda, blog y video, tres
-páginas sobre Lisboa y ruido (clima, una receta).
+Scenario: 14 tabs opened one by one and viewed for 2.7 s each — a Google search about React
+hooks followed by a ChatGPT conversation and three sites (opened from the search, with
+`openerTabId`), a bike search with a shop, a blog and a video, three pages about Lisbon, and
+noise (weather, a recipe).
 
-Resultado medido (Chromium 156, i7-12700K, Windows 11): **14/14 comprobaciones**.
+Measured result (Chromium 156, i7-12700K, Windows 11): **14/14 checks**.
 
-| Comprobación | Resultado |
+| Check | Result |
 |---|---|
-| Registros y pestaña de origen | 14/14 registros; `openerId` correcto en las 3 pestañas abiertas desde la búsqueda |
-| Miniaturas reales | 14 capturas WebP de 320 px (≈2,5 KB en estas páginas simples; páginas reales pesan más) |
-| Tarjetas | Por defecto, minimalistas (sin imagen ni colores); con miniatura y colores activados en «Diseño de tarjetas», 14 tarjetas con miniatura; tras «Borrar todas las miniaturas», pósters generados |
-| Línea de tiempo | filas de día y de sesión |
-| Temas | 3 grupos: «Hooks · useEffect · React» (búsqueda + ChatGPT + 3 sitios, recorrido que empieza en la búsqueda), «Bicicleta · rodado · MTB» (búsqueda + tienda + blog + video), «Lisboa» (3); clima y receta fuera de todo grupo |
-| Análisis | 3–8 ms para 14 referencias en el *worker*; 10.000 referencias sintéticas ≈0,2 s (prueba unitaria en Node) |
-| Agrupar en Chrome | grupo de pestañas nativo con las 5 pestañas del tema |
-| Reglas → Miniaturas | el interruptor refleja el ajuste guardado y no avisa de permiso faltante |
+| Records and opener tab | 14/14 records; correct `openerId` on the 3 tabs opened from the search |
+| Real thumbnails | 14 WebP captures at 320 px (≈2.5 KB on these simple pages; real pages weigh more) |
+| Cards | Minimal by default (no image or colors); with thumbnail and colors enabled in "Diseño de tarjetas", 14 cards with thumbnails; after "Borrar todas las miniaturas", generated posters |
+| Timeline | day and session rows |
+| Topics | 3 groups: "Hooks · useEffect · React" (search + ChatGPT + 3 sites, path starting at the search), "Bicicleta · rodado · MTB" (search + shop + blog + video), "Lisboa" (3); weather and recipe outside any group |
+| Analysis | 3–8 ms for 14 references in the *worker*; 10,000 synthetic references ≈0.2 s (unit test in Node) |
+| Group in Chrome | native tab group with the topic's 5 tabs |
+| Reglas → Miniaturas | the toggle reflects the saved setting and doesn't warn about a missing permission |
 
-Después de los cambios de la v1.1 (migración de la base a la versión 2, `openerId`,
-listeners de miniaturas) la batería principal volvió a pasar completa: `node e2e/run.mjs
---tabs 200 --quick` → **9/9 escenarios**.
+After the v1.1 changes (database migration to version 2, `openerId`, thumbnail listeners)
+the main suite passed in full again: `node e2e/run.mjs --tabs 200 --quick` → **9/9
+scenarios**.
 
-No cubierto: el diálogo real de permisos, la IA integrada de Chrome (Gemini Nano no está en
-el Chromium de Playwright; el código detecta su ausencia y oculta el botón) y temas con miles
-de referencias reales.
+Not covered: the real permission dialog, Chrome's built-in AI (Gemini Nano is not in
+Playwright's Chromium; the code detects its absence and hides the button) and topics with
+thousands of real references.
 
-## ESTIMACIONES (no medidas)
+## ESTIMATES (not measured)
 
-- En Chrome estable 155 con un perfil real los tiempos deberían ser del mismo orden: el costo
-  dominante del archivado masivo es `chrome.tabs.remove` en lotes de 25 más las escrituras
-  `strict` (≈ 80–100 pestañas/s aquí). Con un disco más lento o con antivirus que escanee
-  IndexedDB puede ser 2–5× más lento. Sin medir.
-- Memoria con pestañas **cargadas** (no fue el caso medido): cada renderizador de una página
-  real usa decenas a cientos de MB; ahí archivar sí libera memoria de inmediato.
+- On stable Chrome 155 with a real profile, times should be of the same order: the dominant
+  cost of a bulk archive is `chrome.tabs.remove` in batches of 25 plus the `strict` writes
+  (≈ 80–100 tabs/s here). With a slower disk or antivirus scanning IndexedDB it may be 2–5×
+  slower. Not measured.
+- Memory with **loaded** tabs (not the measured case): each renderer of a real page uses
+  tens to hundreds of MB; there, archiving does free memory immediately.
 
-## Errores encontrados y corregidos
+## Bugs found and fixed
 
-1. **El barrido de arranque no resolvía los cierres interrumpidos diferidos**
-   (`src/background/index.ts`). Tras un corte, al despertar dentro del período de gracia
-   `resumeOps()` difiere el cierre interrumpido (las pestañas todavía se están restaurando) y lo
-   marca como activo; el barrido de los 3 min sólo llamaba a `reconcile()`, que deja en paz las
-   operaciones activas. Resultado medido (S4 *middle*, 400 pestañas): tras la gracia seguían 400
-   registros con `pendingClose` y 376 pestañas **sin rastrear**, hasta la alarma de mantenimiento
-   (hasta 15 min) o un reinicio del worker. Corrección: el barrido ejecuta `resumeOps()` y luego
-   `reconcile()`. Prueba: `tests/crashRecovery.test.ts` («a close interrupted by a crash … is
-   completed by the startup sweep»).
-2. **Duplicados masivos cuando el navegador restaura pestañas recién archivadas**
-   (`src/core/reconcile.ts`, `src/shared/constants.ts`). Si el navegador se corta pocos segundos
-   después de un archivado masivo, su archivo de sesión todavía tiene las pestañas y las
-   restaura; como los registros estaban `archived` (cierre explícito), se creaba un registro
-   nuevo por pestaña (S4 *late*, 400 pestañas: 768 registros para 400 pestañas). Corrección:
-   regla de re-vinculación **4b**, sólo durante la gracia de arranque de una sesión nueva y sólo
-   para registros cerrados por Fangio como mucho 10 min (`RESTORED_AFTER_CLOSE_WINDOW_MS`)
-   **antes** de que empezara la sesión: se reutiliza el registro (acción `rebind`). Un archivado
-   hecho en la sesión actual nunca se re-vincula. Pruebas: `tests/crashRecovery.test.ts` (3 casos).
-   Documentado en `docs/ARCHITECTURE.md`.
+1. **The startup sweep didn't resolve deferred interrupted closes**
+   (`src/background/index.ts`). After a kill, on waking within the grace period
+   `resumeOps()` defers the interrupted close (tabs are still being restored) and marks it as
+   active; the 3-minute sweep only called `reconcile()`, which leaves active operations alone.
+   Measured result (S4 *middle*, 400 tabs): after the grace period there were still 400
+   records with `pendingClose` and 376 **untracked** tabs, until the maintenance alarm (up to
+   15 min) or a worker restart. Fix: the sweep runs `resumeOps()` and then `reconcile()`.
+   Test: `tests/crashRecovery.test.ts` ("a close interrupted by a crash … is completed by
+   the startup sweep").
+2. **Mass duplicates when the browser restores just-archived tabs**
+   (`src/core/reconcile.ts`, `src/shared/constants.ts`). If the browser goes down a few
+   seconds after a bulk archive, its session file still has the tabs and restores them;
+   since the records were `archived` (explicit close), a new record was created per tab (S4
+   *late*, 400 tabs: 768 records for 400 tabs). Fix: relinking rule **4b**, only during the
+   startup grace period of a new session and only for records closed by Fangio at most
+   10 min (`RESTORED_AFTER_CLOSE_WINDOW_MS`) **before** the session started: the record is
+   reused (action `rebind`). An archive done in the current session is never relinked.
+   Tests: `tests/crashRecovery.test.ts` (3 cases). Documented in `docs/ARCHITECTURE.md`.
 
-Ambas correcciones se validaron de nuevo en navegador real (S4 con 400 y con 820 pestañas).
+Both fixes were validated again in a real browser (S4 with 400 and with 820 tabs).
 
-## Hallazgos que no son errores de Fangio
+## Findings that are not Fangio bugs
 
-- **Tras un corte duro, el service worker de la extensión no arranca en la sesión siguiente**
-  (Chromium 156, extensiones cargadas con `--load-extension`; reproducido también con una
-  extensión mínima de prueba, clásica y de módulo). Las páginas de la extensión abren, pero
-  `chrome.runtime.sendMessage` falla con «Receiving end does not exist». En el arranque
-  siguiente vuelve a funcionar. Mientras tanto Fangio no rastrea nada (no hay pérdida: no se
-  cierra ninguna pestaña y los datos quedan intactos; la reconciliación del arranque siguiente
-  pone todo al día). No se pudo comprobar si pasa igual con una extensión sin empaquetar
-  instalada desde `chrome://extensions` en Chrome estable (ver Limitaciones). S4 lo detecta,
-  lo informa (`serviceWorkerStartsAfterCrash: false`) y reinicia el navegador normalmente.
-- Al relanzar después de un corte, el navegador restauró pestañas que Fangio ya había cerrado
-  (288 de 425 en *middle*): el archivo de sesión de Chromium se guarda con retraso. Fangio las
-  re-vincula a sus registros (regla 2 si el cierre no había terminado; regla 4b si sí).
-- `chrome.tabs.discard` de este build no termina el proceso renderizador de pestañas recién
-  cargadas (ver S8).
-- Las pestañas de fondo restauradas no reproducen audio hasta que se muestran una vez
-  (Chromium difiere los medios); el harness activa la pestaña de audio un instante.
+- **After a hard kill, the extension's service worker doesn't start in the next session**
+  (Chromium 156, extensions loaded with `--load-extension`; also reproduced with a minimal
+  test extension, both classic and module). The extension's pages open, but
+  `chrome.runtime.sendMessage` fails with "Receiving end does not exist". On the following
+  start it works again. Meanwhile Fangio tracks nothing (there is no loss: no tab is closed
+  and the data stays intact; the reconciliation on the next start brings everything up to
+  date). It could not be checked whether the same happens with an unpacked extension
+  installed from `chrome://extensions` in stable Chrome (see Limitations). S4 detects it,
+  reports it (`serviceWorkerStartsAfterCrash: false`) and restarts the browser normally.
+- When relaunching after a kill, the browser restored tabs Fangio had already closed (288 of
+  425 in *middle*): Chromium's session file is saved with a delay. Fangio relinks them to
+  their records (rule 2 if the close hadn't finished; rule 4b if it had).
+- `chrome.tabs.discard` in this build doesn't terminate the renderer process of freshly
+  loaded tabs (see S8).
+- Restored background tabs don't play audio until they are shown once (Chromium defers
+  media); the harness activates the audio tab for an instant.
 
-## Limitaciones (lo que NO cubre esta batería)
+## Limitations (what this suite does NOT cover)
 
-- **Chromium de Playwright 156, no Chrome estable 155** ni el perfil real del usuario. El
-  comportamiento de restauración de sesión, descarte y ciclo de vida del worker puede variar.
-- **Restauración de sesión de un perfil real con 800 pestañas** de sitios reales (páginas
-  pesadas, logins, `beforeunload`): no probado. Las páginas de prueba son mínimas y locales.
-- **Instalación persistente**: Chromium no persiste las extensiones cargadas por CDP; tras
-  reiniciar se usa `--load-extension`. No se probó «Cargar descomprimida» desde
-  `chrome://extensions` ni la actualización con `update.ps1`.
-- **Headless**: las ventanas son de `--headless=new`. La UI se maneja con eventos de entrada
-  reales vía CDP, pero no se validó apariencia visual, foco real del sistema operativo,
-  atajos de teclado globales (`commands`) ni el popup de la acción.
-- **Audio**: probado con salida de audio falsa (`--disable-audio-output`): `audible=true` se
-  reporta y la protección por audio se cumple (S2). No se probó con dispositivo de audio real ni
-  `audioGraceMinutes` (audio reciente) en navegador real.
-- **`file://`, `ftp://`**, incógnito, pestañas en vista dividida, ventanas emergentes/PWA y
-  `chrome://` no se probaron en navegador real (sólo en las pruebas unitarias).
-- **Alarmas reales de automatización** (cada `checkIntervalMinutes`) y la alarma de
-  mantenimiento de 15 min no se esperaron: S6 usa `runRulesNow`. `lastAccessed` antiguo no se
-  simuló; se usó `targetMinIdleMinutes = 0` e `idleArchiveHours = 0`.
-- **Ciclo de vida del worker**: el harness se adjunta por CDP al service worker para leer el
-  estado, y con DevTools adjunto Chromium no lo termina a los 30 s de inactividad. Las
-  terminaciones del worker en medio de una operación se cubren en las pruebas unitarias
-  (`tests/interruption.test.ts`), no aquí; los cortes duros (S4) sí son reales.
-- Una sola corrida por escenario: no hay estadística (percentiles) de los tiempos.
-- La medición de memoria es exclusiva de Windows (`Win32_Process`).
+- **Playwright's Chromium 156, not stable Chrome 155** nor the user's real profile. Session
+  restore, discard and worker lifecycle behavior may differ.
+- **Session restore of a real profile with 800 tabs** of real sites (heavy pages, logins,
+  `beforeunload`): not tested. The test pages are minimal and local.
+- **Persistent installation**: Chromium doesn't persist extensions loaded through CDP; after
+  a restart `--load-extension` is used. "Load unpacked" from `chrome://extensions` and
+  updating with `update.ps1` were not tested.
+- **Headless**: windows are `--headless=new`. The UI is driven with real input events via
+  CDP, but visual appearance, real OS focus, global keyboard shortcuts (`commands`) and the
+  action popup were not validated.
+- **Audio**: tested with fake audio output (`--disable-audio-output`): `audible=true` is
+  reported and the audio protection holds (S2). Not tested with a real audio device or
+  `audioGraceMinutes` (recent audio) in a real browser.
+- **`file://`, `ftp://`**, incognito, split-view tabs, popup/PWA windows and `chrome://`
+  were not tested in a real browser (only in the unit tests).
+- **Real automation alarms** (every `checkIntervalMinutes`) and the 15-minute maintenance
+  alarm were not waited for: S6 uses `runRulesNow`. An old `lastAccessed` was not
+  simulated; `targetMinIdleMinutes = 0` and `idleArchiveHours = 0` were used.
+- **Worker lifecycle**: the harness attaches to the service worker through CDP to read
+  state, and with DevTools attached Chromium doesn't terminate it after 30 s idle. Worker
+  terminations in the middle of an operation are covered in the unit tests
+  (`tests/interruption.test.ts`), not here; the hard kills (S4) are real.
+- A single run per scenario: there are no statistics (percentiles) for the times.
+- The memory measurement is Windows-only (`Win32_Process`).

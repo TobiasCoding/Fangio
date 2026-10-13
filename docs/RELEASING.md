@@ -1,93 +1,94 @@
-# Publicar versiones de Fangio
+# Releasing Fangio
 
-Guía para mantenedores. Resumen: **una etiqueta `vX.Y.Z` en `main` = un release**.
+Maintainer guide. Summary: **a `vX.Y.Z` tag on `main` = a release**.
 
-## Versionado
+## Versioning
 
-- Versionado semántico `X.Y.Z` (sin sufijos: Chrome sólo acepta números en `version`).
-  - `patch`: correcciones sin cambios de comportamiento visibles.
-  - `minor`: funciones nuevas compatibles; migraciones de base sin pérdida.
-  - `major`: cambios incompatibles (por ejemplo, formato de exportación nuevo).
-- La única fuente de verdad es `version` en `package.json`. `static/manifest.json` tiene
-  `"version": "0.0.0"` como marcador: `scripts/build.mjs` inyecta la versión real en
-  `dist/manifest.json` y escribe `dist/VERSION` (que leen los actualizadores).
-- Cada cambio relevante se anota en la sección `## [Unreleased]` de `CHANGELOG.md`
-  (formato [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/)) en el mismo PR.
+- Semantic versioning `X.Y.Z` (no suffixes: Chrome only accepts numbers in `version`).
+  - `patch`: fixes without visible behavior changes.
+  - `minor`: new compatible features; lossless database migrations.
+  - `major`: incompatible changes (for example, a new export format).
+- The single source of truth is `version` in `package.json`. `static/manifest.json` has
+  `"version": "0.0.0"` as a placeholder: `scripts/build.mjs` injects the real version into
+  `dist/manifest.json` and writes `dist/VERSION` (read by the updaters).
+- Every relevant change is noted in the `## [Unreleased]` section of `CHANGELOG.md`
+  ([Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format) in the same PR.
 
-## Flujo normal
+## Normal flow
 
 ```bash
 git switch main && git pull
 npm ci
-npm run release -- patch     # o minor | major | X.Y.Z
+npm run release -- patch     # or minor | major | X.Y.Z
 git push origin main --follow-tags
 ```
 
 `scripts/release.mjs`:
 
-1. Exige la rama `main`, árbol limpio, que la etiqueta no exista y notas en `[Unreleased]`.
-2. Corre `npm run typecheck` y `npm test` sobre el árbol limpio.
-3. Actualiza `package.json` y `package-lock.json`, mueve las notas a
-   `## [X.Y.Z] - AAAA-MM-DD`, actualiza los enlaces de comparación y corre `npm run build`
-   (que falla si la versión no es `X.Y.Z`). Si algo falla, restaura los tres archivos.
-4. Crea el commit `release: vX.Y.Z` y la etiqueta anotada `vX.Y.Z`.
-5. Imprime (no ejecuta) `git push origin main --follow-tags`.
+1. Requires the `main` branch, a clean tree, a tag that doesn't exist yet and notes in
+   `[Unreleased]`.
+2. Runs `npm run typecheck` and `npm test` on the clean tree.
+3. Updates `package.json` and `package-lock.json`, moves the notes to
+   `## [X.Y.Z] - YYYY-MM-DD`, updates the comparison links and runs `npm run build` (which
+   fails if the version is not `X.Y.Z`). If anything fails, it restores the three files.
+4. Creates the commit `release: vX.Y.Z` and the annotated tag `vX.Y.Z`.
+5. Prints (doesn't run) `git push origin main --follow-tags`.
 
-Al recibir la etiqueta, `.github/workflows/release.yml`:
+When it receives the tag, `.github/workflows/release.yml`:
 
-1. Verifica que la etiqueta sea exactamente `v` + `package.json.version` (si no, falla).
-2. `npm ci`, typecheck, pruebas, `npm run package` con `SOURCE_DATE_EPOCH` = fecha del
-   commit (zip reproducible).
-3. Crea el release con `gh release create` (CLI preinstalada en los runners, autenticada
-   con `GITHUB_TOKEN`), lo marca como *latest* y adjunta `fangio-vX.Y.Z.zip` y
-   `SHA256SUMS.txt`. Las notas salen de la sección de `CHANGELOG.md` (con
-   `scripts/changelog-notes.mjs`) más un pie con instrucciones y el SHA-256; si no hay
-   sección, usa `--generate-notes`.
+1. Checks that the tag is exactly `v` + `package.json.version` (otherwise it fails).
+2. `npm ci`, typecheck, tests, `npm run package` with `SOURCE_DATE_EPOCH` = the commit date
+   (reproducible zip).
+3. Creates the release with `gh release create` (CLI preinstalled on the runners,
+   authenticated with `GITHUB_TOKEN`), marks it as *latest* and attaches `fangio-vX.Y.Z.zip`
+   and `SHA256SUMS.txt`. The notes come from the `CHANGELOG.md` section (via
+   `scripts/changelog-notes.mjs`) plus a footer with instructions and the SHA-256; if there
+   is no section, it uses `--generate-notes`.
 
-Las extensiones instaladas detectan el release en su consulta diaria a
-`/releases/latest`, y `update.ps1` / `update.sh` lo instalan.
+Installed extensions detect the release in their daily query to `/releases/latest`, and
+`update.ps1` / `update.sh` install it.
 
-## Primera versión (1.0.0)
+## First version (1.0.0)
 
-`package.json` ya está en `1.0.0` y `CHANGELOG.md` ya tiene su sección. Pasando la versión
-**actual**, el script sólo verifica, compila y etiqueta (sin commit de versión):
+`package.json` is already at `1.0.0` and `CHANGELOG.md` already has its section. When given
+the **current** version, the script only verifies, builds and tags (no version commit):
 
 ```bash
 npm run release -- 1.0.0
 git push origin main --follow-tags
 ```
 
-## Contenido del release
+## Release contents
 
-`npm run package` (= `npm run build` + `scripts/package.mjs`) genera en `release/`:
+`npm run package` (= `npm run build` + `scripts/package.mjs`) generates in `release/`:
 
-- `fangio-vX.Y.Z.zip`: el contenido de `dist/` en la raíz del zip (`manifest.json`,
+- `fangio-vX.Y.Z.zip`: the contents of `dist/` at the root of the zip (`manifest.json`,
   `background.js`, `dashboard.*`, `popup.*`, `icons/`, `VERSION`, `update.ps1`,
-  `update.cmd`, `update.sh`). JavaScript **sin minificar** y sin *sourcemaps*, para que
-  cualquiera pueda auditar lo que se ejecuta.
-- `SHA256SUMS.txt`: formato de `sha256sum` (`<hash>  fangio-vX.Y.Z.zip`).
+  `update.cmd`, `update.sh`). JavaScript **unminified** and without *sourcemaps*, so anyone
+  can audit what runs.
+- `SHA256SUMS.txt`: `sha256sum` format (`<hash>  fangio-vX.Y.Z.zip`).
 
-El zip se arma sin dependencias (deflate de `zlib`, CRC-32, nombres UTF-8). Para revisarlo:
-`unzip -l release/fangio-vX.Y.Z.zip` o `Expand-Archive` en PowerShell.
+The zip is built without dependencies (`zlib` deflate, CRC-32, UTF-8 names). To inspect it:
+`unzip -l release/fangio-vX.Y.Z.zip` or `Expand-Archive` in PowerShell.
 
-## Si algo sale mal
+## If something goes wrong
 
-- **El workflow falló antes de crear el release**: corregí en `main`, borrá la etiqueta
-  (`git tag -d vX.Y.Z && git push origin :refs/tags/vX.Y.Z`) y volvé a publicar con una
-  versión nueva (preferible) o la misma.
-- **El release salió con un problema**: no reemplaces archivos de un release publicado
-  (los usuarios verifican el SHA-256). Publicá una versión `patch` nueva.
-- **La etiqueta no coincide con `package.json`**: el workflow falla a propósito. Usá
-  siempre `npm run release`.
+- **The workflow failed before creating the release**: fix it on `main`, delete the tag
+  (`git tag -d vX.Y.Z && git push origin :refs/tags/vX.Y.Z`) and publish again with a new
+  version (preferred) or the same one.
+- **The release went out with a problem**: don't replace files of a published release
+  (users verify the SHA-256). Publish a new `patch` version.
+- **The tag doesn't match `package.json`**: the workflow fails on purpose. Always use
+  `npm run release`.
 
-## Probar los instaladores localmente
+## Testing the installers locally
 
-`install.ps1`, `update.ps1` y `update.sh` aceptan la variable de entorno
-`FANGIO_RELEASES_API` (sólo para pruebas) para apuntar a un servidor local que imite
-`https://api.github.com/repos/TobiasCoding/Fangio/releases` (rutas `/latest` y
-`/tags/vX.Y.Z`, con `assets[].name` y `assets[].browser_download_url`). Así se puede probar
-instalación, actualización, verificación de SHA-256 y restauración ante fallos sin
-publicar nada. Verificación de sintaxis:
+`install.ps1`, `update.ps1` and `update.sh` accept the `FANGIO_RELEASES_API` environment
+variable (for testing only) to point to a local server that mimics
+`https://api.github.com/repos/TobiasCoding/Fangio/releases` (routes `/latest` and
+`/tags/vX.Y.Z`, with `assets[].name` and `assets[].browser_download_url`). That way you can
+test installation, updating, SHA-256 verification and rollback on failure without
+publishing anything. Syntax check:
 
 ```powershell
 $null = [System.Management.Automation.PSParser]::Tokenize((Get-Content -Raw scripts/update.ps1), [ref]$null)
@@ -97,37 +98,39 @@ $null = [System.Management.Automation.PSParser]::Tokenize((Get-Content -Raw scri
 bash -n scripts/update.sh
 ```
 
-Los `.ps1` se mantienen en ASCII puro (los acentos se escriben como `\uXXXX`), porque
-Windows PowerShell 5.1 lee los scripts sin BOM con la página de códigos ANSI.
+The `.ps1` files are kept in pure ASCII (accents are written as `\uXXXX`), because Windows
+PowerShell 5.1 reads BOM-less scripts with the ANSI code page.
 
-## Integración continua
+## Continuous integration
 
-- `.github/workflows/ci.yml`: en cada push a `main` y en cada PR corre `npm ci`,
-  typecheck, pruebas y build, y sube `dist/` como artefacto. Permisos: `contents: read`.
-- `.github/workflows/release.yml`: descrito arriba. Permisos: `contents: write`.
-- `.github/dependabot.yml`: actualizaciones semanales de npm y de GitHub Actions.
+- `.github/workflows/ci.yml`: on every push to `main` and every PR it runs `npm ci`,
+  typecheck, tests and build, and uploads `dist/` as an artifact. Permissions:
+  `contents: read`.
+- `.github/workflows/release.yml`: described above. Permissions: `contents: write`.
+- `.github/dependabot.yml`: weekly npm and GitHub Actions updates.
 
-## ID de la extensión (sin `key`)
+## Extension ID (no `key`)
 
-Desde la v1.1.1 `static/manifest.json` **no** tiene `key`: la Chrome Web Store rechaza los
-paquetes que la incluyen, y el mismo zip del release sirve para la tienda y para instalar
-descomprimida. `npm run build` falla si alguien la vuelve a agregar.
+Since v1.1.1 `static/manifest.json` does **not** have a `key`: the Chrome Web Store rejects
+packages that include it, and the same release zip works for the store and for unpacked
+installs. `npm run build` fails if someone adds it back.
 
-- Desde la tienda, el ID lo asigna la tienda y las actualizaciones son automáticas (Fangio no
-  consulta GitHub ni muestra el aviso de `update.ps1` si detecta `update_url` en el manifiesto
-  instalado).
-- Descomprimida, el ID depende de la carpeta. Los actualizadores (`update.*`) reemplazan los
-  archivos en la misma carpeta, así que el ID y la base se conservan.
-- Hasta la v1.1.0 el ID era `domaedkeecbijcmbcjcfpjeabbdcmefb` (fijado por la `key`). Pasar de
-  esa versión a la v1.1.1 requiere exportar e importar la copia JSON (ver INSTALL.md).
+- From the store, the ID is assigned by the store and updates are automatic (Fangio doesn't
+  query GitHub or show the `update.ps1` notice if it detects `update_url` in the installed
+  manifest).
+- Unpacked, the ID depends on the folder. The updaters (`update.*`) replace the files in the
+  same folder, so the ID and the database are kept.
+- Up to v1.1.0 the ID was `domaedkeecbijcmbcjcfpjeabbdcmefb` (fixed by the `key`). Moving
+  from that version to v1.1.1 requires exporting and importing the JSON backup (see
+  INSTALL.md).
 
-Ninguna clave privada (`*.pem`) ni `*.crx` debe commitearse (están en `.gitignore`).
+No private key (`*.pem`) or `*.crx` may be committed (they are in `.gitignore`).
 
-## Configuración recomendada del repositorio
+## Recommended repository settings
 
-- *Settings → Actions → General*: permitir GitHub Actions. Los workflows declaran sus
-  propios permisos, así que el valor por defecto del token puede quedar en «solo lectura».
-- *Settings → Security*: activar **Private vulnerability reporting** (lo usa
-  [SECURITY.md](../SECURITY.md)) y las alertas de Dependabot.
-- Protección de la rama `main` (PR + CI en verde) y una regla que restrinja quién puede
-  crear etiquetas `v*`.
+- *Settings → Actions → General*: allow GitHub Actions. The workflows declare their own
+  permissions, so the token's default can stay "read-only".
+- *Settings → Security*: enable **Private vulnerability reporting** (used by
+  [SECURITY.md](../SECURITY.md)) and Dependabot alerts.
+- `main` branch protection (PR + green CI) and a rule restricting who can create `v*`
+  tags.

@@ -2,7 +2,7 @@
   "name": "fangio",
   "version": "1.1.1",
   "private": true,
-  "description": "Extensión Chromium (MV3) para archivar pestañas en una base local, cerrarlas con seguridad y recuperarlas rápido.",
+  "description": "Chromium extension (MV3) to archive tabs in a local database, close them safely and get them back fast.",
   "license": "GPL-3.0-only",
   "author": "TobiasCoding",
   "repository": {

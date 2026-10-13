@@ -1,41 +1,42 @@
-# Privacidad
+# Privacy
 
-Fangio funciona por completo en tu equipo.
+Fangio runs entirely on your computer.
 
-- **Qué guarda**: URL, título, ícono, ventana y grupo de origen, fechas de apertura, último
-  acceso y archivado de tus pestañas, y lo que vos agregues (notas, etiquetas, proyectos,
-  marcas de pendiente o protegida), además del registro de acciones y la configuración.
-- **Dónde**: en la base IndexedDB de la extensión, dentro de tu perfil del navegador. No se
-  sincroniza con ninguna cuenta. Las exportaciones (JSON y HTML) son archivos que vos
-  descargás y guardás donde quieras.
-- **Qué no hace**: no tiene servidores, cuentas, analíticas, publicidad ni telemetría. No
-  lee el contenido de las páginas (no tiene scripts de contenido) y no registra pestañas de
-  incógnito.
-- **Temas sugeridos**: el análisis que agrupa tus pestañas por tema usa sólo títulos, URLs y
-  fechas que ya están en la base, y se calcula en tu equipo.
-- **Miniaturas (opcional, apagadas por defecto)**: si las activás, Fangio guarda una captura
-  reducida (320 px) de la página que estás mirando. Quedan en la base local, **no** se
-  incluyen en las copias JSON y se borran al eliminar el registro o con «Borrar todas las
-  miniaturas». Nunca se capturan incógnito, sitios excluidos ni páginas de inicio de sesión,
-  cuenta o pagos. Para capturar automáticamente Chrome pide el permiso opcional de «leer y
-  cambiar tus datos en todos los sitios»: Fangio sólo lo usa para la captura de la pestaña
-  visible y lo devuelve al desactivar la opción. Sin ese permiso, las capturas se toman sólo
-  al abrir el popup o al archivar con el atajo (permiso `activeTab`).
-- **IA local (opcional)**: «Nombrar con IA local» usa el modelo integrado de Chrome (Gemini
-  Nano), que corre en tu dispositivo; los títulos no se envían a ningún servidor. Si el
-  modelo no está instalado, Chrome lo descarga una sola vez (de Google) después de que lo
-  confirmes; esa descarga la hace el navegador, no Fangio, y no incluye datos tuyos.
-- **Única conexión de red**: si la opción de buscar actualizaciones está activa (lo está
-  por defecto), una vez por día consulta
-  `https://api.github.com/repos/TobiasCoding/Fangio/releases/latest`. La petición no
-  incluye datos tuyos ni de tus pestañas; como cualquier conexión, GitHub ve tu dirección
-  IP y el navegador. Se desactiva en la configuración del panel.
-- **Íconos de sitios**: se leen de la caché del propio navegador (permiso `favicon`); Fangio
-  no visita los sitios para obtenerlos.
-- **Scripts de instalación y actualización**: sólo se conectan a GitHub (API de releases y
-  descarga de archivos del release) y sólo escriben en la carpeta de la extensión y en una
-  carpeta temporal.
-- **Borrado**: eliminar registros desde la papelera los borra de la base. Quitar la
-  extensión borra toda la base. Las copias que hayas exportado no se ven afectadas.
+- **What it stores**: URL, title, icon, source window and group, and the opened, last
+  accessed and archived dates of your tabs, plus whatever you add (notes, tags, projects,
+  to-do or protected marks), as well as the action log and the settings.
+- **Where**: in the extension's IndexedDB database, inside your browser profile. It is not
+  synced with any account. Exports (JSON and HTML) are files you download and keep wherever
+  you want.
+- **What it doesn't do**: it has no servers, accounts, analytics, advertising or telemetry.
+  It doesn't read page content (it has no content scripts) and doesn't record incognito
+  tabs.
+- **Suggested topics**: the analysis that groups your tabs by topic uses only titles, URLs
+  and dates already in the database, and is computed on your computer.
+- **Thumbnails (optional, off by default)**: if you enable them, Fangio saves a reduced
+  (320 px) capture of the page you are looking at. They stay in the local database, are
+  **not** included in JSON backups and are deleted when the record is deleted or with
+  "Borrar todas las miniaturas" (Delete all thumbnails). Incognito tabs, excluded sites and
+  login, account or payment pages are never captured. To capture automatically, Chrome asks
+  for the optional "Read and change all your data on all websites" permission: Fangio only
+  uses it to capture the visible tab and gives it back when you turn the option off. Without
+  that permission, captures are only taken when you open the popup or archive with the
+  keyboard shortcut (`activeTab` permission).
+- **Local AI (optional)**: "Nombrar con IA local" (Name with local AI) uses Chrome's
+  built-in model (Gemini Nano), which runs on your device; titles are not sent to any
+  server. If the model is not installed, Chrome downloads it once (from Google) after you
+  confirm; that download is made by the browser, not by Fangio, and includes none of your
+  data.
+- **The only network connection**: if the check-for-updates option is on (it is by
+  default), once a day it queries
+  `https://api.github.com/repos/TobiasCoding/Fangio/releases/latest`. The request includes
+  no data about you or your tabs; as with any connection, GitHub sees your IP address and
+  browser. It can be turned off in the panel settings.
+- **Site icons**: they are read from the browser's own cache (`favicon` permission); Fangio
+  doesn't visit the sites to get them.
+- **Install and update scripts**: they only connect to GitHub (releases API and release
+  file downloads) and only write to the extension folder and a temporary folder.
+- **Deletion**: deleting records from the trash removes them from the database. Removing
+  the extension deletes the whole database. Backups you have exported are not affected.
 
-Política de privacidad de GitHub: <https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement>.
+GitHub's privacy statement: <https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement>.

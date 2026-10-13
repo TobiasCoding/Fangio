@@ -1,316 +1,320 @@
-# Arquitectura de Fangio
+# Fangio architecture
 
-Documento de referencia para el código. Los tipos viven en `src/shared/types.ts`,
-el protocolo de mensajes en `src/shared/messages.ts`, constantes en
-`src/shared/constants.ts` y la configuración por defecto en `src/shared/settings.ts`.
+Reference document for the code. Types live in `src/shared/types.ts`, the message protocol
+in `src/shared/messages.ts`, constants in `src/shared/constants.ts` and the default settings
+in `src/shared/settings.ts`.
 
-## Principios
+## Principles
 
-1. **Integridad antes que limpieza.** Ninguna pestaña se cierra si su referencia no
-   quedó escrita y confirmada en IndexedDB (transacción `readwrite` con
-   `durability: 'strict'`, se espera `tx.done`). Ante la duda, la pestaña queda abierta.
-2. **Identidad estable.** Cada referencia tiene `id = crypto.randomUUID()`. Los ids de
-   pestaña/ventana del navegador sólo se guardan dentro de `live` / `pendingClose`,
-   acompañados de `sessionId`, y nunca se usan como clave.
-3. **Idempotencia y reanudación.** Las operaciones de varias fases (cerrar, reabrir) se
-   registran en el diario `ops` antes de producir efectos. El servicio de fondo puede
-   morir en cualquier línea; al despertar, `resumeOps()` + `reconcile()` terminan o
-   revierten sin perder ni duplicar registros.
-4. **Las protecciones prevalecen.** Protegida, fijada, activa, seleccionada
-   (highlighted), con audio actual o reciente, sitio excluido, incógnito, páginas de la
-   propia extensión y URLs no rastreables nunca se cierran automáticamente.
-   Una acción manual sobre un registro protegido se rechaza salvo `force: true` (la UI
-   pide confirmación explícita y desprotege).
-5. **Nada sale del equipo.** Sin backend. La única petición de red opcional es la
-   consulta diaria de releases en `api.github.com` (no envía datos del usuario; se
-   desactiva en Configuración). El análisis contextual, las miniaturas y la IA opcional
-   (Gemini Nano de Chrome) corren en el dispositivo.
+1. **Integrity before tidiness.** No tab is closed unless its reference has been written
+   and confirmed in IndexedDB (`readwrite` transaction with `durability: 'strict'`, waiting
+   for `tx.done`). When in doubt, the tab stays open.
+2. **Stable identity.** Each reference has `id = crypto.randomUUID()`. Browser tab/window
+   ids are only stored inside `live` / `pendingClose`, together with `sessionId`, and are
+   never used as keys.
+3. **Idempotence and resumption.** Multi-phase operations (close, reopen) are recorded in
+   the `ops` journal before they take effect. The background service can die on any line;
+   on wake-up, `resumeOps()` + `reconcile()` complete or roll back without losing or
+   duplicating records.
+4. **Protections take precedence.** Protected, pinned, active, selected (highlighted), with
+   current or recent audio, excluded site, incognito, the extension's own pages and
+   untrackable URLs are never closed automatically. A manual action on a protected record
+   is rejected unless `force: true` (the UI asks for explicit confirmation and unprotects).
+5. **Nothing leaves the computer.** No backend. The only optional network request is the
+   daily releases check on `api.github.com` (sends no user data; can be turned off in the
+   settings). Contextual analysis, thumbnails and the optional AI (Chrome's Gemini Nano)
+   run on the device.
 
-## Estados
+## States
 
-| Estado | Significado | Pestaña |
+| State | Meaning | Tab |
 |---|---|---|
-| `open` | Existe en el navegador y tiene referencia guardada | Sí (`live` vigente) |
-| `archived` | Conserva enlace y contexto sin pestaña | No |
-| `trash` | Descartada, recuperable hasta su eliminación definitiva | No |
+| `open` | Exists in the browser and has a saved reference | Yes (current `live`) |
+| `archived` | Keeps link and context without a tab | No |
+| `trash` | Discarded, recoverable until permanently deleted | No |
 
-`protected`, `pending` (pendiente marcado), `tags`, `project` y `note` son atributos
-independientes del estado. Reabrir un registro archivado reutiliza el mismo `id`
-(state → `open`, `live` nuevo, `reopenCount++`); volver a archivarlo conserva el `id`.
+`protected`, `pending` (marked as to-do), `tags`, `project` and `note` are attributes
+independent of the state. Reopening an archived record reuses the same `id`
+(state → `open`, new `live`, `reopenCount++`); archiving it again keeps the `id`.
 
-### Transiciones
+### Transitions
 
-- Pestaña nueva (rastreable) → registro `open` (`source: 'tracked'`, `openedAt` sólo si se
-  creó después del período de gracia de arranque).
-- Instalación → *snapshot* de todas las pestañas existentes como `open`
-  (`source: 'install-snapshot'`, `importedAt = ahora`, `openedAt` desconocido). Esto ya
-  es una copia de respaldo: desde el primer segundo todas las URLs están en la base.
-- Archivar (manual, importación o regla) → pipeline de cierre seguro → `archived`.
-- Enviar a papelera: si está abierta, el mismo pipeline con `targetState: 'trash'`; si está
-  archivada, cambio de estado.
-- El usuario cierra una pestaña (`onRemoved` con `isWindowClosing: false`) → `trash`
-  con motivo «Cerrada por el usuario» e `implicitCloseAt`.
-- Se cierra una ventana (`isWindowClosing: true`) o el navegador → **no se cambia nada**
-  en el evento. La reconciliación posterior archiva (`window-closed`) los registros `open`
-  sin pestaña una vez pasado el período de gracia. Así un cierre del navegador seguido de
-  restauración de sesión vuelve a vincular las mismas referencias.
-- Restaurar (`trash` → `archived`). Eliminación definitiva sólo desde `trash`.
+- New (trackable) tab → `open` record (`source: 'tracked'`, `openedAt` only if it was
+  created after the startup grace period).
+- Installation → *snapshot* of all existing tabs as `open` (`source: 'install-snapshot'`,
+  `importedAt = now`, `openedAt` unknown). This is already a backup: from the first second
+  all URLs are in the database.
+- Archive (manual, import or rule) → safe close pipeline → `archived`.
+- Send to trash: if open, the same pipeline with `targetState: 'trash'`; if archived, a
+  state change.
+- The user closes a tab (`onRemoved` with `isWindowClosing: false`) → `trash` with reason
+  "Cerrada por el usuario" (closed by the user) and `implicitCloseAt`.
+- A window (`isWindowClosing: true`) or the browser is closed → **nothing changes** in the
+  event. The later reconciliation archives (`window-closed`) `open` records without a tab
+  once the grace period has passed. That way a browser close followed by a session restore
+  relinks the same references.
+- Restore (`trash` → `archived`). Permanent deletion only from `trash`.
 
-### Re-vinculación (evita duplicados)
+### Relinking (avoids duplicates)
 
-Cuando aparece una pestaña rastreable no vinculada, se busca en este orden:
-1. Registro `open` cuyo `live.tabId` coincide y con la misma URL (recarga de la extensión:
-   los ids de pestaña siguen valiendo aunque cambie `sessionId`).
-2. Registro con `pendingClose` y misma URL (cierre interrumpido; la pestaña sobrevivió).
-3. Registro `open` sin vínculo vigente con la misma URL exacta; desempate por cercanía de
-   (`origin.windowOrdinal`, `origin.index`).
-4. Registro con `implicitCloseAt` en los últimos `REBIND_WINDOW_MS` y misma URL
-   (Ctrl+Shift+T, «reabrir ventana cerrada»). Acción `rebind`.
-4b. Sólo durante el período de gracia de arranque de una sesión nueva: registro cerrado por
-   una operación de Fangio (`archived`/`trash`) como mucho `RESTORED_AFTER_CLOSE_WINDOW_MS`
-   (10 min) **antes** de que empezara la sesión, con la misma URL. Es el caso del navegador
-   que restaura pestañas que acabábamos de cerrar porque se cortó (crash, corte de luz)
-   antes de guardar la sesión: se reutiliza la referencia en lugar de duplicarla. Acción `rebind`.
-5. Si nada coincide → registro nuevo.
+When an unlinked trackable tab appears, Fangio looks, in this order, for:
+1. An `open` record whose `live.tabId` matches, with the same URL (extension reload: tab
+   ids are still valid even if `sessionId` changes).
+2. A record with `pendingClose` and the same URL (interrupted close; the tab survived).
+3. An `open` record with no current link and the exact same URL; ties are broken by
+   proximity of (`origin.windowOrdinal`, `origin.index`).
+4. A record with `implicitCloseAt` within the last `REBIND_WINDOW_MS` and the same URL
+   (Ctrl+Shift+T, "reopen closed window"). Action `rebind`.
+4b. Only during the startup grace period of a new session: a record closed by a Fangio
+   operation (`archived`/`trash`) at most `RESTORED_AFTER_CLOSE_WINDOW_MS` (10 min)
+   **before** the session started, with the same URL. This is the case of the browser
+   restoring tabs we had just closed because it went down (crash, power cut) before saving
+   the session: the reference is reused instead of being duplicated. Action `rebind`.
+5. If nothing matches → new record.
 
-Fuera de la regla 4b, nunca se re-vinculan registros archivados explícitamente: dos pestañas
-iguales no se asumen iguales en estado (ver Duplicados).
+Outside rule 4b, explicitly archived records are never relinked: two identical tabs are not
+assumed to share state (see Duplicates).
 
-## Pipeline de cierre (archivar / papelera)
+## Close pipeline (archive / trash)
 
-    Guardar → confirmar escritura → revalidar → cerrar → registrar resultado
+    Save → confirm write → revalidate → close → record result
 
-1. **Diario**: se escribe `OpJournal{kind:'close', items:[{recordId, tabId, status:'pending'}]}`.
-2. **Guardar**: por lotes (`WRITE_BATCH_SIZE`), se actualiza cada registro con los datos
-   frescos de la pestaña (`chrome.tabs.get`) y `pendingClose{opId, tabId, sessionId,
-   expectedUrl, targetState}`. Se espera `tx.done` con durabilidad estricta. Si la escritura
-   falla, el ítem queda `failed` y **la pestaña no se toca**.
-3. **Revalidar** inmediatamente antes de cerrar: `chrome.tabs.get(tabId)` debe existir, la
-   URL debe ser idéntica a `expectedUrl`, y la pestaña debe seguir siendo elegible (para
-   acciones automáticas y la importación inicial: no activa, no fijada, sin audio, sitio no
-   excluido, no protegida, etc.; para acciones manuales: no protegida salvo `force`). Las
-   decisiones automáticas llevan la URL evaluada (`CloseItem.expectedUrl`): si la pestaña ya
-   muestra otra, se omite. Además se relee el registro: debe conservar el
-   mismo `pendingClose.opId`. Si algo cambió → `skipped` y se limpia `pendingClose`.
-   Una acción forzada sobre un registro protegido que termina omitida o con error le
-   devuelve la protección.
-4. **Cerrar** con `chrome.tabs.remove` en lotes de `CLOSE_BATCH_SIZE`. Cada lote vuelve a
-   consultar las pestañas y descarta las que ya no muestran la URL esperada («La URL cambió
-   antes de cerrar»: quedan abiertas y se limpia `pendingClose`). Consulta + resguardo +
-   `remove` de cada lote corren bajo un mutex global, así dos operaciones concurrentes no
-   pueden dejar juntas al navegador vacío. Si el lote falla, se
-   reintenta de a una para aislar el error. Si cerrar dejaría al navegador sin ninguna
-   pestaña normal, primero se crea una pestaña nueva vacía.
-5. **Registrar resultado**: `state = targetState`, `archivedAt`/`trashedAt`, `live = null`,
-   `pendingClose = null`, ítems `done`, entrada en el registro de acciones con motivo y
-   `before` para deshacer. El handler de `onRemoved` reconoce las pestañas con
-   `pendingClose` (o en el set en memoria de cierres en curso) y no las trata como
-   «cerradas por el usuario».
+1. **Journal**: `OpJournal{kind:'close', items:[{recordId, tabId, status:'pending'}]}` is
+   written.
+2. **Save**: in batches (`WRITE_BATCH_SIZE`), each record is updated with the tab's fresh
+   data (`chrome.tabs.get`) and `pendingClose{opId, tabId, sessionId, expectedUrl,
+   targetState}`. `tx.done` is awaited with strict durability. If the write fails, the item
+   is left `failed` and **the tab is not touched**.
+3. **Revalidate** right before closing: `chrome.tabs.get(tabId)` must exist, the URL must
+   be identical to `expectedUrl`, and the tab must still be eligible (for automatic actions
+   and the initial import: not active, not pinned, no audio, site not excluded, not
+   protected, etc.; for manual actions: not protected unless `force`). Automatic decisions
+   carry the evaluated URL (`CloseItem.expectedUrl`): if the tab now shows another one, it
+   is skipped. The record is also reread: it must keep the same `pendingClose.opId`. If
+   anything changed → `skipped` and `pendingClose` is cleared. A forced action on a
+   protected record that ends up skipped or failing gives it its protection back.
+4. **Close** with `chrome.tabs.remove` in batches of `CLOSE_BATCH_SIZE`. Each batch queries
+   the tabs again and drops those that no longer show the expected URL ("La URL cambió
+   antes de cerrar", i.e. the URL changed before closing: they stay open and `pendingClose`
+   is cleared). Query + safeguard + `remove` of each batch run under a global mutex, so two
+   concurrent operations cannot together leave the browser empty. If the batch fails, tabs
+   are retried one by one to isolate the error. If closing would leave the browser without
+   any normal tab, a new empty tab is created first.
+5. **Record result**: `state = targetState`, `archivedAt`/`trashedAt`, `live = null`,
+   `pendingClose = null`, items `done`, an entry in the action log with reason and `before`
+   for undo. The `onRemoved` handler recognizes tabs with `pendingClose` (or in the
+   in-memory set of closes in progress) and doesn't treat them as "closed by the user".
 
-Recuperación tras interrupción (`resumeOps` al despertar y en la alarma de mantenimiento):
-- Ítem `pending` (nada escrito todavía): se marca `skipped` (la pestaña sigue abierta).
-- Registro con `pendingClose` y pestaña todavía existente con la misma URL: se **aborta**
-  (se limpia `pendingClose`, sigue `open`). La regla volverá a evaluarla; nunca cerramos a
-  ciegas después de una interrupción.
-- Registro con `pendingClose` cuya pestaña ya no existe (o sesión distinta y ninguna
-  pestaña con esa URL tras la gracia de arranque): se completa a `targetState`.
+Recovery after an interruption (`resumeOps` on wake-up and in the maintenance alarm):
+- `pending` item (nothing written yet): marked `skipped` (the tab stays open).
+- Record with `pendingClose` whose tab still exists with the same URL: **aborted**
+  (`pendingClose` is cleared, it stays `open`). The rule will evaluate it again; we never
+  close blindly after an interruption.
+- Record with `pendingClose` whose tab no longer exists (or a different session and no tab
+  with that URL after the startup grace): completed to `targetState`.
 
-## Reapertura
+## Reopening
 
-`OpJournal{kind:'reopen'}`; concurrencia limitada por `reopenConcurrency`.
-Por ítem: marcar `creating` (persistido) → registrar URL esperada en memoria →
-`chrome.tabs.create({url, active:false, windowId})` → vincular `live` y `state:'open'`
-→ `done`. Se espera `status === 'complete'` o `REOPEN_LOAD_TIMEOUT_MS` antes de liberar
-el cupo; si la reapertura es masiva y `discardAfterBulkReopen`, las pestañas en segundo
-plano se descartan (`chrome.tabs.discard`) después de cargar. Con `restoreGroups`, se
-reagrupa por `origin.groupTitle` en la ventana destino.
-Reanudación: ítems `creating` sin `tabId` → si existe una pestaña no vinculada con esa URL
-se vincula; si no, se crea. Nunca se crean dos pestañas para el mismo ítem en la misma sesión.
+`OpJournal{kind:'reopen'}`; concurrency limited by `reopenConcurrency`.
+Per item: mark `creating` (persisted) → record expected URL in memory →
+`chrome.tabs.create({url, active:false, windowId})` → link `live` and `state:'open'` →
+`done`. Fangio waits for `status === 'complete'` or `REOPEN_LOAD_TIMEOUT_MS` before
+releasing the slot; if the reopen is a bulk one and `discardAfterBulkReopen` is set,
+background tabs are discarded (`chrome.tabs.discard`) after loading. With `restoreGroups`,
+tabs are regrouped by `origin.groupTitle` in the target window.
+Resumption: `creating` items without a `tabId` → if an unlinked tab with that URL exists it
+is linked; otherwise it is created. Two tabs are never created for the same item in the same
+session.
 
-## Seguimiento de eventos (tracker)
+## Event tracking (tracker)
 
-Los listeners se registran **sincrónicamente en el nivel superior** de `background/index.ts`
-(requisito de MV3). Los eventos de alto volumen (`onUpdated` de título/favicon/audio) se
-acumulan en memoria y se vuelcan con debounce (`EVENT_FLUSH_MS`) en una sola transacción.
-Perder un volcado por terminación del worker no es grave: la reconciliación periódica
-re-sincroniza títulos y URLs. Los cambios de estado críticos nunca se difieren.
+Listeners are registered **synchronously at the top level** of `background/index.ts` (an
+MV3 requirement). High-volume events (`onUpdated` for title/favicon/audio) are accumulated
+in memory and flushed with a debounce (`EVENT_FLUSH_MS`) in a single transaction. Losing a
+flush because the worker is terminated is not serious: periodic reconciliation resyncs
+titles and URLs. Critical state changes are never deferred.
 
-- `onCreated` / `onUpdated(url)` → crear o re-vincular (ver arriba), o actualizar URL
-  (la anterior pasa a `previousUrls`).
-- `onActivated` → `lastAccessedAt = ahora`.
-- Pestaña nueva con `openerTabId` de una pestaña vinculada → `openerId` = id del registro de
-  origen (enlace seguido / «abrir en pestaña nueva»). Sólo se fija al crear el registro; es una
-  señal para el análisis contextual.
+- `onCreated` / `onUpdated(url)` → create or relink (see above), or update the URL (the
+  previous one goes to `previousUrls`).
+- `onActivated` → `lastAccessedAt = now`.
+- New tab with an `openerTabId` of a linked tab → `openerId` = id of the source record
+  (followed link / "open in new tab"). Only set when the record is created; it is a signal
+  for contextual analysis.
 - `onUpdated(audible)` → `lastAudibleAt`.
-- `onRemoved` → ver transiciones.
-- `onReplaced` → mover `live.tabId`. `onAttached`/`onDetached` → actualizar `live.windowId`.
+- `onRemoved` → see transitions.
+- `onReplaced` → move `live.tabId`. `onAttached`/`onDetached` → update `live.windowId`.
 
-URLs rastreables: `http:`, `https:`, `file:`, `ftp:`. `chrome://newtab`, `about:blank`,
-páginas de la propia extensión y otras URLs internas no generan registros (no cuentan para
-el objetivo de pestañas abiertas). Pestañas de incógnito se ignoran por completo.
+Trackable URLs: `http:`, `https:`, `file:`, `ftp:`. `chrome://newtab`, `about:blank`, the
+extension's own pages and other internal URLs don't create records (they don't count toward
+the open-tab target). Incognito tabs are ignored completely.
 
-## Sesión y reconciliación
+## Session and reconciliation
 
-`sessionId` vive en `chrome.storage.session` (se borra al reiniciar el navegador o recargar
-la extensión). `onStartup` guarda `startupAt` y programa `ALARM_STARTUP_SWEEP`; esa alarma
-ejecuta `resumeOps()` (resuelve los cierres interrumpidos que quedaron diferidos por la gracia)
-y luego `reconcile()`.
-`reconcile()` (al iniciar el worker si pasaron >5 min desde la última, en la alarma de
-mantenimiento y manualmente):
-1. Lista pestañas (`chrome.tabs.query({})`, excluye incógnito).
-2. Vincula/actualiza según la tabla de re-vinculación.
-3. Registros `open` sin pestaña: dentro de `STARTUP_GRACE_MS` desde el arranque no se
-   tocan; si no, → `archived` con motivo «No encontrada (ventana cerrada o sesión no
-   restaurada)» (acción `window-closed`). Nunca a `trash`, nunca se borran.
-4. Resuelve `pendingClose` huérfanos (ver pipeline).
-La función de planificación es pura (`planReconcile`) y está cubierta por pruebas.
+`sessionId` lives in `chrome.storage.session` (cleared when the browser restarts or the
+extension reloads). `onStartup` saves `startupAt` and schedules `ALARM_STARTUP_SWEEP`; that
+alarm runs `resumeOps()` (resolves the interrupted closes that were deferred by the grace
+period) and then `reconcile()`.
+`reconcile()` (on worker start if more than 5 min have passed since the last one, in the
+maintenance alarm and manually):
+1. Lists tabs (`chrome.tabs.query({})`, excluding incognito).
+2. Links/updates according to the relinking table.
+3. `open` records without a tab: within `STARTUP_GRACE_MS` of startup they are not touched;
+   otherwise → `archived` with reason "No encontrada (ventana cerrada o sesión no
+   restaurada)" (not found: window closed or session not restored; action
+   `window-closed`). Never to `trash`, never deleted.
+4. Resolves orphaned `pendingClose` entries (see pipeline).
+The planning function is pure (`planReconcile`) and covered by tests.
 
-## Reglas automáticas
+## Automatic rules
 
-Sólo con `automationEnabled` (apagado hasta que el usuario lo activa tras la importación).
-Alarma `ALARM_AUTOMATION` cada `checkIntervalMinutes`. `evaluateRules()` es pura: recibe
-pestañas, registros, configuración y `now`, devuelve un `RulePreview`. La UI muestra
-exactamente esa previsualización antes de activar.
+Only with `automationEnabled` (off until the user enables it after the import). Alarm
+`ALARM_AUTOMATION` every `checkIntervalMinutes`. `evaluateRules()` is pure: it receives
+tabs, records, settings and `now`, and returns a `RulePreview`. The UI shows exactly that
+preview before enabling.
 
 `idleMinutes = (now - max(record.lastAccessedAt, tab.lastAccessed)) / 60000`.
 
-Orden de evaluación por pestaña abierta:
-1. Bloqueos (`BlockReason`): si hay alguno → `keep` con explicación. Prevalecen siempre.
-2. Regla de URL exacta habilitada que coincide y `idleMinutes >= afterMinutes` → su acción.
-3. Inactividad: `idleArchiveHours > 0` y `idleMinutes >= idleArchiveHours*60` → `archive`.
-4. Objetivo: si quedan más de `targetOpenTabs` abiertas (contando todas las rastreables,
-   incluso bloqueadas), se archivan las más antiguas por último acceso con
-   `idleMinutes >= targetMinIdleMinutes` hasta llegar al objetivo. Las vistas recientemente
-   se mantienen aunque se supere el objetivo (`recently-viewed`).
-5. Tope `maxAutoClosePerRun` (las más inactivas primero); `capped` lo indica.
+Evaluation order per open tab:
+1. Blocks (`BlockReason`): if there is any → `keep` with an explanation. They always take
+   precedence.
+2. An enabled exact-URL rule that matches with `idleMinutes >= afterMinutes` → its action.
+3. Inactivity: `idleArchiveHours > 0` and `idleMinutes >= idleArchiveHours*60` → `archive`.
+4. Target: if more than `targetOpenTabs` remain open (counting every trackable tab, even
+   blocked ones), the oldest by last access with `idleMinutes >= targetMinIdleMinutes` are
+   archived until the target is reached. Recently viewed tabs are kept even if the target is
+   exceeded (`recently-viewed`).
+5. Cap `maxAutoClosePerRun` (most idle first); `capped` indicates it.
 
-Cada acción automática se registra con su motivo, p. ej.
-«Archivada automáticamente: sin consultar hace 26 h (inactividad > 24 h)».
+Each automatic action is recorded with its reason, e.g. "Archivada automáticamente: sin
+consultar hace 26 h (inactividad > 24 h)" (archived automatically: not viewed for 26 h,
+inactivity > 24 h).
 
-## Duplicados
+## Duplicates
 
-Referencias con URL **idéntica** (comparación exacta de strings) se agrupan en la vista
-Duplicados. «Fusionar» (manual) conserva el registro elegido y le
-agrega: unión de etiquetas, notas concatenadas, `pending`/`protected` por OR, fecha de
-creación mínima, último acceso máximo, `mergedFrom`. Los demás pasan a `trash` con motivo
-«Fusionada en …» (recuperables, deshacer disponible). Un registro abierto no puede
-fusionarse en otro (se rechaza: hay que archivarlo antes).
+References with an **identical** URL (exact string comparison) are grouped in the
+Duplicados (Duplicates) view. "Fusionar" (Merge, manual) keeps the chosen record and adds to
+it: union of tags, concatenated notes, `pending`/`protected` by OR, minimum creation date,
+maximum last access, `mergedFrom`. The others go to `trash` with reason "Fusionada en …"
+(merged into …; recoverable, undo available). An open record cannot be merged into another
+(it is rejected: it must be archived first).
 
-Única fusión automática, la regla `dedupeArchived` (activada por defecto; `core/duplicates.ts`,
-`planArchivedDedupe` + `dedupeArchived`): en cada grupo de registros `archived` con URL idéntica,
-los que no tienen datos propios (`note`, `tags`, `project`, `pending`, `protected`) se fusionan
-con `planMerge` en el que se conserva (el más recientemente usado con datos; si ninguno tiene,
-el más recientemente usado). Nunca toca registros con datos, abiertos, ocupados o con
-`pendingClose`. Corre después de archivar (manual, atajo, asistente de importación, reglas a
-mano y alarma de automatización), después de importar JSON y en el mantenimiento. Deja una
-única acción `merge` con `auto: true`, deshacible (con la regla activa, las copias restauradas
-se vuelven a fusionar en la siguiente pasada: para conservarlas hay que desactivarla).
+The only automatic merge is the `dedupeArchived` rule (on by default; `core/duplicates.ts`,
+`planArchivedDedupe` + `dedupeArchived`): in each group of `archived` records with an
+identical URL, those with no data of their own (`note`, `tags`, `project`, `pending`,
+`protected`) are merged with `planMerge` into the one that is kept (the most recently used
+with data; if none has data, the most recently used). It never touches records with data,
+open ones, busy ones or ones with `pendingClose`. It runs after archiving (manual, shortcut,
+import wizard, rules run by hand and the automation alarm), after a JSON import and during
+maintenance. It leaves a single `merge` action with `auto: true`, which can be undone (with
+the rule on, restored copies are merged again on the next pass: to keep them, the rule must
+be turned off).
 
-Importar JSON de otra instalación (otro ID, como al pasar de la v1.1.0 a la v1.1.1): un registro
-que estaba `open` en la copia y cuya URL está abierta aquí con otro id se une a ese registro
-abierto (`foldIntoOpen`): conserva id, estado y pestaña, y gana etiquetas, nota, marcas, fechas
-e historial.
+Importing JSON from another installation (a different ID, as when moving from v1.1.0 to
+v1.1.1): a record that was `open` in the backup and whose URL is open here under another id
+is joined to that open record (`foldIntoOpen`): it keeps the id, state and tab, and gains
+tags, note, marks, dates and history.
 
-## Papelera y eliminación definitiva
+## Trash and permanent deletion
 
-Política explícita y separada del archivado: `trashRetentionDays` (30 por defecto; 0 =
-nunca). La alarma de mantenimiento elimina sólo registros en `trash` con
-`trashedAt < now - retención`, y deja una entrada `purge` en el registro (no deshacible).
-Como resguardo ante saltos de reloj, no elimina nada si algún `trashedAt` está en el futuro
-(el reloj retrocedió) y nunca más de 500 por ejecución (las más antiguas primero).
-Los mensajes `purge` y `emptyTrash` requieren `confirm: 'ELIMINAR'` (resguardo contra mensajes
-accidentales; el panel lo envía sin pedírselo al usuario: Supr y «Eliminar definitivamente» no
-piden confirmación, «Vaciar papelera» pide una confirmación simple).
+An explicit policy separate from archiving: `trashRetentionDays` (30 by default; 0 = never).
+The maintenance alarm deletes only `trash` records with `trashedAt < now - retention`, and
+leaves a `purge` entry in the log (not undoable). As a safeguard against clock jumps, it
+deletes nothing if any `trashedAt` is in the future (the clock went back) and never more than
+500 per run (oldest first). The `purge` and `emptyTrash` messages require
+`confirm: 'ELIMINAR'` (a safeguard against accidental messages; the panel sends it without
+asking the user: Delete and "Eliminar definitivamente" don't ask for confirmation, "Vaciar
+papelera" asks for a simple confirmation).
 
-## Registro de acciones y deshacer
+## Action log and undo
 
-Cada mutación escribe una `ActionEntry` con motivo y `before`. Deshacer:
-- `archive`/`trash` de pestañas abiertas → se reabren (concurrencia limitada).
-- `trash` de archivados, `restore`, `update`, `merge`, `user-closed`, `window-closed` →
-  se restauran los campos de `before`.
-- `purge` no se puede deshacer (sólo desde una copia JSON).
-Retención del registro: `logRetentionDays`.
+Each mutation writes an `ActionEntry` with reason and `before`. Undo:
+- `archive`/`trash` of open tabs → they are reopened (limited concurrency).
+- `trash` of archived records, `restore`, `update`, `merge`, `user-closed`,
+  `window-closed` → the fields in `before` are restored.
+- `purge` cannot be undone (only from a JSON backup).
+Log retention: `logRetentionDays`.
 
-## Persistencia (IndexedDB `fangio`, versión 2)
+## Persistence (IndexedDB `fangio`, version 2)
 
-- `records` (keyPath `id`): índices `state`, `url`, `domain`, `tags` (multiEntry), `updatedAt`.
-- `actions` (keyPath `id`): índice `at`.
-- `ops` (keyPath `id`): diario de operaciones.
+- `records` (keyPath `id`): indexes `state`, `url`, `domain`, `tags` (multiEntry),
+  `updatedAt`.
+- `actions` (keyPath `id`): index `at`.
+- `ops` (keyPath `id`): operations journal.
 - `kv` (keyPath `key`): `settings`, `lastAutoRun`, `updateInfo`, `meta`.
-- `thumbs` (keyPath `id` = id del registro, índice `at`; desde la versión 2): miniaturas
-  `ThumbEntry` (WebP de 320 px como `ArrayBuffer`). Durabilidad relajada (se recapturan). Se
-  borran en la misma transacción que la eliminación definitiva del registro; el mantenimiento
-  elimina huérfanas y las más viejas por encima de `MAX_THUMBNAILS` (3000). Nunca se exportan.
-- La migración 1 → 2 sólo agrega el almacén `thumbs` (aditiva, sin tocar registros).
-Se pide `unlimitedStorage` para que el archivo no sea desalojado. Las migraciones futuras
-se hacen en `onupgradeneeded` sin pérdida de datos.
+- `thumbs` (keyPath `id` = record id, index `at`; since version 2): `ThumbEntry` thumbnails
+  (320 px WebP as an `ArrayBuffer`). Relaxed durability (they are recaptured). They are
+  deleted in the same transaction as the record's permanent deletion; maintenance removes
+  orphans and the oldest above `MAX_THUMBNAILS` (3000). Never exported.
+- The 1 → 2 migration only adds the `thumbs` store (additive, records untouched).
+`unlimitedStorage` is requested so the archive is not evicted. Future migrations are done in
+`onupgradeneeded` without data loss.
 
-## Exportación / importación
+## Export / import
 
-JSON versionado `ExportFileV1` (`format: 'fangio-export'`, `schemaVersion: 1`). Al importar
-se valida cada registro (sólo URLs http/https/file/ftp, largos acotados; las entradas del
-registro de acciones se filtran por campos y nunca son deshacibles); los registros
-importados en estado `open` pasan a `archived` (no tienen pestaña) y los de `trash` reciben
-`trashedAt = ahora` (la retención cuenta desde la importación); fusión por `id` (gana
-`updatedAt` mayor, pero un registro abierto o con cierre en curso conserva URL, estado y
-vínculo; la URL que pierde pasa a `previousUrls`); nunca se borra nada al importar. Reabrir
-rechaza URLs no rastreables. También se exporta HTML en formato de marcadores Netscape (importable en
-cualquier navegador) como vía de recuperación independiente de la extensión.
+Versioned JSON `ExportFileV1` (`format: 'fangio-export'`, `schemaVersion: 1`). On import,
+each record is validated (only http/https/file/ftp URLs, bounded lengths; action log entries
+are filtered by field and are never undoable); records imported in the `open` state become
+`archived` (they have no tab) and `trash` ones get `trashedAt = now` (retention counts from
+the import); merge by `id` (the higher `updatedAt` wins, but an open record or one with a
+close in progress keeps its URL, state and link; the losing URL goes to `previousUrls`);
+nothing is ever deleted on import. Reopening rejects untrackable URLs. HTML in Netscape
+bookmarks format (importable in any browser) is also exported as a recovery path
+independent of the extension.
 
-## Miniaturas (opcional, apagadas por defecto)
+## Thumbnails (optional, off by default)
 
-`core/thumbs.ts`. Con `settings.thumbnails`, cuando una pestaña queda visible y cargada
-`THUMB_SETTLE_MS` (1,5 s), `chrome.tabs.captureVisibleTab` toma lo que el usuario ya está viendo,
-se reduce a 320 px (`createImageBitmap` + `OffscreenCanvas`, WebP) y se guarda bajo el id del registro.
-Guardas, todas obligatorias: captura automática sólo con el permiso opcional `<all_urls>` concedido
-por el usuario (el popup y el atajo de archivar usan la concesión de `activeTab`); sólo http(s);
-nunca incógnito, sitios excluidos, `thumbnailExclusions` ni URLs sensibles (login, cuenta, pagos,
-parámetros con credenciales); la pestaña debe seguir activa y con la misma URL después de la
-captura; como máximo 2 capturas por segundo; se recaptura sólo si cambió la URL o pasaron
-`THUMB_REFRESH_MS` (15 min). Al desactivar la opción se devuelve el permiso opcional.
+`core/thumbs.ts`. With `settings.thumbnails`, when a tab stays visible and loaded for
+`THUMB_SETTLE_MS` (1.5 s), `chrome.tabs.captureVisibleTab` takes what the user is already
+seeing, it is reduced to 320 px (`createImageBitmap` + `OffscreenCanvas`, WebP) and saved
+under the record id. Safeguards, all mandatory: automatic capture only with the optional
+`<all_urls>` permission granted by the user (the popup and the archive shortcut use the
+`activeTab` grant); http(s) only; never incognito, excluded sites, `thumbnailExclusions` or
+sensitive URLs (login, account, payments, parameters with credentials); the tab must still
+be active and on the same URL after the capture; at most 2 captures per second; recaptured
+only if the URL changed or `THUMB_REFRESH_MS` (15 min) has passed. Turning the option off
+gives the optional permission back.
 
-## Análisis contextual (vista Temas)
+## Contextual analysis (Temas view)
 
-Motor puro en `core/context/` (detalle e investigación en [CONTEXT.md](CONTEXT.md)): rasgos de
-título, consulta de búsqueda y URL; TF-IDF; peso por par = léxico × núcleo temporal de dos
-escalas + pestaña de origen + grupo de Chrome + proyecto; comunidades de Louvain; nombres por
-c-TF-IDF. Corre en un *worker* dedicado (`context-worker.js`) desde el panel, sobre las
-referencias filtradas (máximo 8000, las de actividad más reciente). Sólo usa instantes de
-actividad real (`openedAt`, `lastAccessedAt`), nunca fechas de operaciones masivas. Las acciones
-sobre una sugerencia usan los mensajes existentes (`updateRecords`, `archive`, `reopen`) más
-`groupTabs` (grupo de Chrome por ventana; no cierra, no mueve entre ventanas, ignora fijadas).
-Nombres con IA: opcional, con la Prompt API de Chrome (Gemini Nano en el dispositivo).
+Pure engine in `core/context/` (details and research in [CONTEXT.md](CONTEXT.md)): title,
+search query and URL features; TF-IDF; per-pair weight = lexical × two-scale temporal kernel
++ opener tab + Chrome group + project; Louvain communities; c-TF-IDF names. It runs in a
+dedicated *worker* (`context-worker.js`) from the panel, on the filtered references (at most
+8000, those with the most recent activity). It only uses instants of real activity
+(`openedAt`, `lastAccessedAt`), never dates of bulk operations. Actions on a suggestion use
+the existing messages (`updateRecords`, `archive`, `reopen`) plus `groupTabs` (Chrome group
+per window; doesn't close, doesn't move between windows, ignores pinned tabs). AI naming:
+optional, with Chrome's Prompt API (Gemini Nano on the device).
 
-## Interfaz
+## Interface
 
-- `dashboard.html` (pestaña completa): cuatro vistas del mismo conjunto filtrado (Lista
-  virtualizada, Tarjetas configurables (minimalistas por defecto; miniatura, tamaño, campos y colores opcionales), Línea de tiempo por día y sesión de
-  trabajo, Temas sugeridos), búsqueda (título, URL, nota),
-  filtros (estado, dominio, etiquetas, proyecto, pendientes, protegidas), orden cronológico,
-  acciones individuales y por selección, asistente de importación inicial, reglas con
-  previsualización, duplicados, papelera, registro con deshacer, copia de seguridad.
-  Lee IndexedDB directamente; muta vía mensajes; escucha `BroadcastChannel`.
-- `popup.html`: pestaña actual (archivar, proteger, pendiente, nota, etiquetas), contadores,
-  abrir panel.
-- Atajos (`commands`): abrir panel, archivar pestaña actual.
+- `dashboard.html` (full tab): four views of the same filtered set (virtualized List,
+  configurable Cards (minimal by default; optional thumbnail, size, fields and colors),
+  Timeline by day and work session, suggested Topics), search (title, URL, note), filters
+  (status, domain, tags, project, to-dos, protected), chronological order, per-item and bulk
+  actions, initial import wizard, rules with preview, duplicates, trash, log with undo,
+  backup. It reads IndexedDB directly; mutates via messages; listens on `BroadcastChannel`.
+- `popup.html`: current tab (archive, protect, to-do, note, tags), counters, open panel.
+- Shortcuts (`commands`): open panel, archive current tab.
 
-## Permisos
+## Permissions
 
-`tabs` (URL/título de pestañas), `tabGroups` (título/color de grupo de origen), `storage`
-(`storage.session`), `alarms`, `unlimitedStorage`, `favicon` (iconos desde la caché del
-navegador vía `/_favicon/` sin visitar sitios), `activeTab` (miniatura de la pestaña en la que se
-abre el popup o se usa el atajo; sin advertencia). Permiso de host **opcional**
-`<all_urls>`: sólo se pide al activar las miniaturas automáticas y sólo se usa para
-`captureVisibleTab`. Sin scripts de contenido: nunca se lee ni modifica el contenido de las páginas.
-El manifiesto no incluye `key` (la Chrome Web Store la rechaza): desde la tienda el ID lo fija
-la tienda; descomprimida, el ID depende de la carpeta, y los actualizadores reemplazan los
-archivos en la misma carpeta para conservarlo. Mover la carpeta cambia el ID y deja la base
-atrás: hay que exportar e importar la copia JSON (el import une los registros abiertos por URL).
+`tabs` (tab URL/title), `tabGroups` (source group title/color), `storage`
+(`storage.session`), `alarms`, `unlimitedStorage`, `favicon` (icons from the browser cache
+via `/_favicon/` without visiting sites), `activeTab` (thumbnail of the tab where the popup
+is opened or the shortcut is used; no warning). **Optional** host permission `<all_urls>`:
+only requested when automatic thumbnails are enabled and only used for
+`captureVisibleTab`. No content scripts: page content is never read or modified.
+The manifest doesn't include `key` (the Chrome Web Store rejects it): from the store, the ID
+is set by the store; unpacked, the ID depends on the folder, and the updaters replace the
+files in the same folder to keep it. Moving the folder changes the ID and leaves the
+database behind: the JSON backup must be exported and imported (the import joins open
+records by URL).
 
-## Limitaciones conocidas
+## Known limitations
 
-- Conservar URL y título no recupera formularios, borradores ni estado interno de apps.
-- La cronología previa a la instalación es desconocida (`openedAt` vacío).
-- `tab.lastAccessed` tras reiniciar el navegador puede reflejar la restauración.
-- Desinstalar («Quitar») la extensión borra su IndexedDB: exportar antes. Recargar o
-  actualizar no borra datos.
+- Keeping URL and title doesn't recover forms, drafts or internal app state.
+- The timeline before installation is unknown (empty `openedAt`).
+- `tab.lastAccessed` after a browser restart may reflect the restore.
+- Uninstalling ("Remove") the extension deletes its IndexedDB: export first. Reloading or
+  updating doesn't delete data.

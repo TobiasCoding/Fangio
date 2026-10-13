@@ -1,53 +1,53 @@
-# Política de seguridad
+# Security policy
 
-## Versiones con soporte
+## Supported versions
 
-Sólo la **última versión publicada** en
-[Releases](https://github.com/TobiasCoding/Fangio/releases/latest) recibe correcciones de
-seguridad. Actualizá con `update.cmd` / `update.ps1` / `update.sh` (ver
-[docs/INSTALL.md](docs/INSTALL.md#actualizar)).
+Only the **latest published version** in
+[Releases](https://github.com/TobiasCoding/Fangio/releases/latest) receives security fixes.
+Update with `update.cmd` / `update.ps1` / `update.sh` (see
+[docs/INSTALL.md](docs/INSTALL.md#updating)).
 
-## Cómo reportar una vulnerabilidad
+## How to report a vulnerability
 
-**No abras un issue público.** Usá el reporte privado de GitHub:
+**Don't open a public issue.** Use GitHub's private reporting:
 
-1. Entrá a la pestaña [**Security**](https://github.com/TobiasCoding/Fangio/security) del
-   repositorio.
-2. Tocá **Report a vulnerability** y completá el formulario.
+1. Go to the repository's [**Security**](https://github.com/TobiasCoding/Fangio/security)
+   tab.
+2. Click **Report a vulnerability** and fill in the form.
 
-Incluí, si podés: versión de Fangio y del navegador, sistema operativo, pasos para
-reproducir, impacto esperado y una prueba de concepto mínima. Por favor no incluyas datos
-personales reales (por ejemplo, tu propia exportación de pestañas).
+If you can, include: Fangio and browser versions, operating system, steps to reproduce,
+expected impact and a minimal proof of concept. Please don't include real personal data
+(for example, your own tab export).
 
-Qué podés esperar:
+What you can expect:
 
-- Acuse de recibo dentro de los 7 días.
-- Una evaluación inicial y un plan dentro de los 30 días.
-- Crédito en las notas de la versión con la corrección, si lo deseás.
+- Acknowledgement within 7 days.
+- An initial assessment and a plan within 30 days.
+- Credit in the release notes of the fixed version, if you wish.
 
-## Alcance
+## Scope
 
-Interesan especialmente:
+Of particular interest:
 
-- Pérdida o corrupción de datos (pestañas cerradas sin referencia guardada, registros
-  borrados fuera de la política de la papelera).
-- Fugas de datos: cualquier vía por la que información de tus pestañas salga del equipo.
-- Ejecución de código o inyección en el panel o el popup (por ejemplo, a través de títulos,
-  URLs o archivos de importación maliciosos).
-- Los scripts `install.ps1`, `update.ps1` y `update.sh`: verificación de integridad
-  (SHA-256, nombre y `key` del manifiesto), manejo de rutas y restauración ante fallos.
-- El flujo de publicación (`.github/workflows/`).
+- Data loss or corruption (tabs closed without a saved reference, records deleted outside
+  the trash policy).
+- Data leaks: any path through which information about your tabs leaves the computer.
+- Code execution or injection in the panel or the popup (for example, through malicious
+  titles, URLs or import files).
+- The `install.ps1`, `update.ps1` and `update.sh` scripts: integrity verification (SHA-256
+  and manifest name), path handling and rollback on failure.
+- The publishing pipeline (`.github/workflows/`).
 
-Fuera de alcance: problemas que requieren acceso previo al equipo o al perfil del navegador
-con permisos de usuario, y las limitaciones documentadas en el README.
+Out of scope: issues that require prior access to the computer or to the browser profile
+with user permissions, and the limitations documented in the README.
 
-## Modelo de amenazas, en breve
+## Threat model, in short
 
-- Fangio no tiene servidor ni cuentas; los datos viven en IndexedDB dentro del perfil.
-- No tiene permisos de host ni scripts de contenido; la CSP de sus páginas sólo permite
-  scripts propios (`script-src 'self'`).
-- Los releases se compilan en GitHub Actions desde la etiqueta, sin minificar, y se
-  publican con su SHA-256. Los actualizadores verifican esa suma y que el manifiesto
-  descargado tenga la misma `key` que la instalación.
-- La suma se descarga del mismo release que el zip: protege contra descargas corruptas o
-  incompletas, no contra un compromiso de la cuenta de GitHub del proyecto.
+- Fangio has no server or accounts; the data lives in IndexedDB inside the profile.
+- It has no content scripts, and its only host permission is optional (automatic
+  thumbnails); the CSP of its pages only allows its own scripts (`script-src 'self'`).
+- Releases are built in GitHub Actions from the tag, unminified, and published with their
+  SHA-256. The updaters verify that checksum and that the downloaded manifest is Fangio's.
+- The checksum is downloaded from the same release as the zip: it protects against
+  corrupted or incomplete downloads, not against a compromise of the project's GitHub
+  account.

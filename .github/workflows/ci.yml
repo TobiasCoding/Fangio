@@ -18,7 +18,7 @@ env:
 
 jobs:
   check:
-    name: Typecheck, tests y build
+    name: Typecheck, tests and build
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -36,7 +36,7 @@ jobs:
       - run: npm test
       - run: npm run build
 
-      - name: Subir dist/ como artefacto
+      - name: Upload dist/ as an artifact
         uses: actions/upload-artifact@v7
         with:
           name: fangio-dist-${{ github.sha }}
