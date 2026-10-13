@@ -8,7 +8,15 @@ import { chromium } from 'playwright';
 import { CDP, evaluate } from './cdp.mjs';
 import { PageDriver } from './page.mjs';
 
-export const FANGIO_ID = 'domaedkeecbijcmbcjcfpjeabbdcmefb';
+/**
+ * Fangio's extension id. The manifest has no "key" (the Chrome Web Store rejects it), so an
+ * unpacked copy gets an id derived from its folder: it is discovered once loaded and kept here
+ * (live binding: importers see the update). The same dist/ path keeps the same id across launches.
+ */
+export let FANGIO_ID = '';
+export function setFangioId(id) {
+  FANGIO_ID = id;
+}
 const liveBrowsers = new Set();
 /** Hard-kills every browser launched by this process (harness cleanup). */
 export function killAll() {
@@ -186,6 +194,27 @@ export async function launchBrowser(opts) {
 export async function loadUnpacked(b, path) {
   const r = await b.cdp.send('Extensions.loadUnpacked', { path });
   return r.id;
+}
+
+/**
+ * Finds Fangio's id and remembers it: the service worker /background.js whose manifest is named
+ * "Fangio" (the browser may run other extensions with a background.js of their own).
+ */
+export async function fangioId(b, timeout = 60000) {
+  const id = await waitFor(
+    async () => {
+      for (const t of await b.targets()) {
+        if (t.type !== 'service_worker' || !t.url.endsWith('/background.js')) continue;
+        const host = new URL(t.url).host;
+        const name = await b.ext(host).eval(() => chrome.runtime.getManifest().name, undefined, 5000).catch(() => null);
+        if (name === 'Fangio') return host;
+      }
+      return null;
+    },
+    { timeout, interval: 300, label: 'Fangio service worker' },
+  );
+  setFangioId(id);
+  return FANGIO_ID;
 }
 
 /** Finds the helper extension id (the one whose SW url ends with /bg.js). */

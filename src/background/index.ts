@@ -11,6 +11,7 @@ import {
 import type { Envelope, Request } from '../shared/messages';
 import { defaultSettings } from '../shared/settings';
 import { purgeExpired, pruneLog } from '../core/actions';
+import { dedupeArchived } from '../core/duplicates';
 import { countByState, getDb, getKv, getSettings, putSettings, setKv } from '../core/db';
 import { resumeOps } from '../core/resume';
 import { onLocalChange, rt } from '../core/runtime';
@@ -111,6 +112,7 @@ export async function runMaintenance(): Promise<void> {
   if (r.continuation) void r.continuation;
   await tracker.reconcile();
   await purgeExpired();
+  await dedupeArchived();
   await pruneLog();
   await thumbs.pruneThumbnails().catch(() => 0);
   scheduleBadge();
@@ -121,6 +123,7 @@ async function handleAlarm(alarm: chrome.alarms.Alarm): Promise<void> {
   switch (alarm.name) {
     case ALARM_AUTOMATION:
       await runAutomation('alarm');
+      await dedupeArchived();
       break;
     case ALARM_MAINTENANCE:
       await runMaintenance();

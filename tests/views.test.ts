@@ -1,5 +1,6 @@
 // Pure helpers of the v1.1 views: timeline grouping and the local-AI answer parser.
 import { describe, expect, it } from 'vitest';
+import { cardMetrics, DEFAULT_CARD_PREFS, sanitizeCardPrefs } from '../src/ui/dashboard/cardPrefs';
 import type { TabRecord } from '../src/shared/types';
 import { parseAiAnswer } from '../src/ui/dashboard/localAi';
 import { buildTimeline, SESSION_GAP_MS } from '../src/ui/dashboard/views/Timeline';
@@ -46,5 +47,23 @@ describe('dismissed suggestions', () => {
     const s = { ids: ['a', 'b', 'c', 'd'] } as never;
     expect(isDismissed(s, [['a', 'b', 'c']])).toBe(true);
     expect(isDismissed(s, [['a', 'x', 'y']])).toBe(false);
+  });
+});
+
+describe('card design preferences', () => {
+  it('defaults to minimal and repairs stored values', () => {
+    expect(DEFAULT_CARD_PREFS).toMatchObject({ image: 'none', colors: false });
+    expect(sanitizeCardPrefs(null)).toEqual(DEFAULT_CARD_PREFS);
+    expect(sanitizeCardPrefs({ image: 'thumb', size: 'huge', colors: 'yes', extra: 1 })).toEqual({ ...DEFAULT_CARD_PREFS, image: 'thumb' });
+  });
+
+  it('card height grows with what is shown (fixed per layout, for the virtual grid)', () => {
+    const base = cardMetrics(DEFAULT_CARD_PREFS);
+    expect(cardMetrics({ ...DEFAULT_CARD_PREFS, showUrl: true }).height).toBeGreaterThan(base.height);
+    expect(cardMetrics({ ...DEFAULT_CARD_PREFS, showMarks: false, showDate: false }).height).toBeLessThan(base.height);
+    const thumb = cardMetrics({ ...DEFAULT_CARD_PREFS, image: 'thumb', size: 'comfortable' });
+    expect(thumb.thumbHeight).toBeGreaterThan(0);
+    expect(thumb.titleLines).toBe(3);
+    expect(thumb.height).toBeGreaterThan(base.height + thumb.thumbHeight);
   });
 });

@@ -190,11 +190,26 @@ Cada acción automática se registra con su motivo, p. ej.
 ## Duplicados
 
 Referencias con URL **idéntica** (comparación exacta de strings) se agrupan en la vista
-Duplicados. Nada se fusiona solo. «Fusionar» (manual) conserva el registro elegido y le
+Duplicados. «Fusionar» (manual) conserva el registro elegido y le
 agrega: unión de etiquetas, notas concatenadas, `pending`/`protected` por OR, fecha de
 creación mínima, último acceso máximo, `mergedFrom`. Los demás pasan a `trash` con motivo
 «Fusionada en …» (recuperables, deshacer disponible). Un registro abierto no puede
 fusionarse en otro (se rechaza: hay que archivarlo antes).
+
+Única fusión automática, la regla `dedupeArchived` (activada por defecto; `core/duplicates.ts`,
+`planArchivedDedupe` + `dedupeArchived`): en cada grupo de registros `archived` con URL idéntica,
+los que no tienen datos propios (`note`, `tags`, `project`, `pending`, `protected`) se fusionan
+con `planMerge` en el que se conserva (el más recientemente usado con datos; si ninguno tiene,
+el más recientemente usado). Nunca toca registros con datos, abiertos, ocupados o con
+`pendingClose`. Corre después de archivar (manual, atajo, asistente de importación, reglas a
+mano y alarma de automatización), después de importar JSON y en el mantenimiento. Deja una
+única acción `merge` con `auto: true`, deshacible (con la regla activa, las copias restauradas
+se vuelven a fusionar en la siguiente pasada: para conservarlas hay que desactivarla).
+
+Importar JSON de otra instalación (otro ID, como al pasar de la v1.1.0 a la v1.1.1): un registro
+que estaba `open` en la copia y cuya URL está abierta aquí con otro id se une a ese registro
+abierto (`foldIntoOpen`): conserva id, estado y pestaña, y gana etiquetas, nota, marcas, fechas
+e historial.
 
 ## Papelera y eliminación definitiva
 
@@ -203,7 +218,9 @@ nunca). La alarma de mantenimiento elimina sólo registros en `trash` con
 `trashedAt < now - retención`, y deja una entrada `purge` en el registro (no deshacible).
 Como resguardo ante saltos de reloj, no elimina nada si algún `trashedAt` está en el futuro
 (el reloj retrocedió) y nunca más de 500 por ejecución (las más antiguas primero).
-«Vaciar papelera» y «Eliminar definitivamente» requieren `confirm: 'ELIMINAR'`.
+Los mensajes `purge` y `emptyTrash` requieren `confirm: 'ELIMINAR'` (resguardo contra mensajes
+accidentales; el panel lo envía sin pedírselo al usuario: Supr y «Eliminar definitivamente» no
+piden confirmación, «Vaciar papelera» pide una confirmación simple).
 
 ## Registro de acciones y deshacer
 
@@ -267,7 +284,7 @@ Nombres con IA: opcional, con la Prompt API de Chrome (Gemini Nano en el disposi
 ## Interfaz
 
 - `dashboard.html` (pestaña completa): cuatro vistas del mismo conjunto filtrado (Lista
-  virtualizada, Tarjetas con miniatura o póster generado, Línea de tiempo por día y sesión de
+  virtualizada, Tarjetas configurables (minimalistas por defecto; miniatura, tamaño, campos y colores opcionales), Línea de tiempo por día y sesión de
   trabajo, Temas sugeridos), búsqueda (título, URL, nota),
   filtros (estado, dominio, etiquetas, proyecto, pendientes, protegidas), orden cronológico,
   acciones individuales y por selección, asistente de importación inicial, reglas con
@@ -285,8 +302,10 @@ navegador vía `/_favicon/` sin visitar sitios), `activeTab` (miniatura de la pe
 abre el popup o se usa el atajo; sin advertencia). Permiso de host **opcional**
 `<all_urls>`: sólo se pide al activar las miniaturas automáticas y sólo se usa para
 `captureVisibleTab`. Sin scripts de contenido: nunca se lee ni modifica el contenido de las páginas.
-El manifiesto incluye una clave pública (`key`) para fijar el ID de la extensión: así la
-base de datos sobrevive aunque se mueva la carpeta de instalación.
+El manifiesto no incluye `key` (la Chrome Web Store la rechaza): desde la tienda el ID lo fija
+la tienda; descomprimida, el ID depende de la carpeta, y los actualizadores reemplazan los
+archivos en la misma carpeta para conservarlo. Mover la carpeta cambia el ID y deja la base
+atrás: hay que exportar e importar la copia JSON (el import une los registros abiertos por URL).
 
 ## Limitaciones conocidas
 

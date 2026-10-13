@@ -166,6 +166,11 @@ export interface Settings {
   discardAfterBulkReopen: boolean;
   /** When reopening, put the tab back into a group with the original title/color (in the target window). */
   restoreGroups: boolean;
+  /**
+   * Rule: archived records with the identical URL and no data of their own (note, tags, project,
+   * pending, protected) are merged so only one remains; the redundant ones go to the trash.
+   */
+  dedupeArchived: boolean;
   /** Daily check of GitHub releases (no user data is sent). */
   updateCheck: boolean;
   /** Action log entries older than this are pruned. */

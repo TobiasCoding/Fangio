@@ -8,7 +8,45 @@ publican también en la página de [releases](https://github.com/TobiasCoding/Fa
 
 ## [Unreleased]
 
+### Importante: actualizar desde la v1.1.0
+
+El manifiesto ya **no** tiene `key` (la Chrome Web Store rechaza los paquetes que la incluyen).
+Para el navegador, la v1.1.1 es **otra extensión con otra base de datos**, y el actualizador de
+la v1.1.0 se niega a instalarla («la clave no coincide»). Para pasar sin perder nada:
+**exportá una copia JSON** en la versión vieja (Panel → Copias), instalá la v1.1.1 e
+**importá** esa copia. Las pestañas que siguen abiertas se unen a su registro en vez de
+quedar duplicadas. Desde la v1.1.1, `update.*` vuelve a funcionar entre versiones (mientras no
+muevas la carpeta).
+
+### Agregado
+
+- **Supr** elimina sin preguntar: la referencia del panel de detalle (o la selección) va a la
+  papelera, cerrando su pestaña si está abierta; si ya estaba en la papelera, se elimina
+  definitivamente. En Mac, `Cmd+Borrar`.
+- **Regla de duplicados archivados** (activada por defecto, en Reglas): de varias archivadas con
+  la URL idéntica y sin datos propios (nota, etiquetas, proyecto, pendiente o protegida) queda
+  una sola; las demás van a la papelera. Las que tienen datos no se tocan. Para
+  recuperar las copias: desactivar la regla y deshacer desde Registro.
+- **Diseño de tarjetas**: elegí imagen (sin imagen / miniatura), tamaño (compacta / cómoda) y
+  qué mostrar (sitio, fecha, URL, marcas y etiquetas, estado, colores por sitio).
+- Importar una copia JSON de otra instalación une los registros que estaban abiertos con las
+  mismas URLs abiertas aquí (conserva notas, etiquetas, marcas y fechas).
+
+### Cambiado
+
+- **Tarjetas** rediseñadas: un solo bloque compacto (ícono y sitio, título, marcas y fecha),
+  minimalista por defecto, sin imagen ni colores.
+- Eliminar es más simple: ya no hay que escribir `ELIMINAR`. «Eliminar definitivamente» y
+  «Papelera» no piden confirmación; «Vaciar papelera» pide una confirmación simple.
+- Instalada desde la Chrome Web Store, Fangio no consulta GitHub ni muestra el aviso de
+  `update.ps1` (la tienda la actualiza sola).
+- `install.ps1`, `update.ps1` y `update.sh` reconocen Fangio por el nombre del manifiesto (ya
+  no por la `key`) y siguen instalando en la misma carpeta.
+
 ### Corregido
+
+- El aviso de «Eliminadas» ya no ofrece «Deshacer» (el borrado definitivo no se puede
+  deshacer).
 
 - `update.ps1` / `update.cmd` no encontraban la carpeta instalada al ejecutarse con Windows
   PowerShell 5.1 (`$PSScriptRoot` vacío como valor por defecto de un parámetro) y pedían

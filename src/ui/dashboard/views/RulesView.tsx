@@ -336,6 +336,16 @@ export function RulesView() {
       </section>
 
       <section class="card">
+        <h2>Duplicados archivados</h2>
+        <Switch
+          checked={draft.dedupeArchived}
+          onChange={(v) => set('dedupeArchived', v)}
+          label="Dejar una sola copia de cada página archivada repetida"
+          hint="Si hay dos o más archivadas con la URL idéntica y sin datos propios (nota, etiquetas, proyecto, pendiente o protegida), se fusionan en una y las demás van a la papelera. Las que tienen datos nunca se tocan. Para recuperar las copias, desactivá la regla y después deshacé desde Registro (con la regla activa se vuelven a fusionar)."
+        />
+      </section>
+
+      <section class="card">
         <h2>Reapertura</h2>
         <NumberField label="Pestañas que se abren a la vez" hint="Al reabrir muchas, se cargan de a estas por vez." value={draft.reopenConcurrency} min={1} max={10} onChange={(v) => set('reopenConcurrency', v)} />
         <div class="stack">

@@ -13,7 +13,7 @@ import { createServer as createHttpsServer } from 'node:https';
 import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { FANGIO_ID, freshProfile, helperId, killAll, launchBrowser, sleep, waitFor } from './lib/browser.mjs';
+import { FANGIO_ID, fangioId, freshProfile, helperId, killAll, launchBrowser, sleep, waitFor } from './lib/browser.mjs';
 import { openDashboard, sendMsg } from './lib/fangio.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -155,6 +155,13 @@ async function checkViews(dash, helper) {
   await dash.front();
   await dash.reload();
   await shot(dash, '1-lista');
+  // Default cards: minimal, text only (no image, no colors).
+  await clickView(dash, 'Tarjetas', '.rcard', TABS.length);
+  check('default cards are minimal (no image, no colors)', await dash.eval(() => !document.querySelector('.rcard-thumb, .rcard.has-colors')));
+  await shot(dash, '2-tarjetas-minimalistas');
+  // Card design is configurable (kept in localStorage): thumbnails + site colors.
+  await dash.eval(() => localStorage.setItem('fangio.cards.prefs', JSON.stringify({ image: 'thumb', colors: true })));
+  await dash.reload();
   await clickView(dash, 'Tarjetas', '.rcard', TABS.length);
   await dash.waitFor(() => document.querySelectorAll('.rcard img.thumb-img').length >= 8, undefined, { timeout: 15000, label: 'thumbnails in cards' });
   check('cards show thumbnails', true, await dash.eval(() => document.querySelectorAll('.rcard img.thumb-img').length));
@@ -250,7 +257,7 @@ async function main() {
   try {
     check('browser', true, await b.version());
     const helper = b.ext(await helperId(b));
-    await b.ext(FANGIO_ID).attach(60000);
+    await b.ext(await fangioId(b)).attach(60000);
     const dash = await openDashboard(b, '#/lista');
     await sendMsg(dash, { type: 'skipOnboarding' });
     const s = await sendMsg(dash, { type: 'getSettings' });

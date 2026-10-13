@@ -65,7 +65,9 @@ Playwright con `--user-data-dir` propio.
 - Instalación con pestañas existentes: método que funcionó → **CDP `Extensions.loadUnpacked`**
   sobre el navegador en marcha (requiere `--enable-unsafe-extension-debugging`). Chromium no
   persiste esas extensiones entre reinicios, así que los relanzamientos cargan el mismo `dist/`
-  con `--load-extension` (mismo id gracias a la `key` del manifiesto, misma IndexedDB).
+  con `--load-extension` (el manifiesto no tiene `key`: el id depende de la carpeta, y como es el
+  mismo `dist/` el id y la IndexedDB son los mismos; el harness lo descubre en tiempo de
+  ejecución buscando el service worker cuyo manifiesto se llama «Fangio»).
 
 ### Invariantes globales (después de cada escenario)
 
@@ -186,7 +188,7 @@ Resultado medido (Chromium 156, i7-12700K, Windows 11): **14/14 comprobaciones**
 |---|---|
 | Registros y pestaña de origen | 14/14 registros; `openerId` correcto en las 3 pestañas abiertas desde la búsqueda |
 | Miniaturas reales | 14 capturas WebP de 320 px (≈2,5 KB en estas páginas simples; páginas reales pesan más) |
-| Tarjetas | 14 tarjetas con miniatura; tras «Borrar todas las miniaturas», pósters generados |
+| Tarjetas | Por defecto, minimalistas (sin imagen ni colores); con miniatura y colores activados en «Diseño de tarjetas», 14 tarjetas con miniatura; tras «Borrar todas las miniaturas», pósters generados |
 | Línea de tiempo | filas de día y de sesión |
 | Temas | 3 grupos: «Hooks · useEffect · React» (búsqueda + ChatGPT + 3 sitios, recorrido que empieza en la búsqueda), «Bicicleta · rodado · MTB» (búsqueda + tienda + blog + video), «Lisboa» (3); clima y receta fuera de todo grupo |
 | Análisis | 3–8 ms para 14 referencias en el *worker*; 10.000 referencias sintéticas ≈0,2 s (prueba unitaria en Node) |

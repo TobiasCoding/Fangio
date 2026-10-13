@@ -8,7 +8,7 @@ import { previewRules, runAutomation, type LastAutoRun } from '../core/automatio
 import { importJson } from '../core/backup';
 import { archiveTab, runCloseOp } from '../core/closeOp';
 import { getKv, getRecordsByState, getSettings } from '../core/db';
-import { mergeRecords } from '../core/duplicates';
+import { dedupeArchived, mergeRecords } from '../core/duplicates';
 import { applyImport, getImportPreview } from '../core/importWizard';
 import { reopenRecords } from '../core/reopenOp';
 import { groupTabs } from '../core/tabGroups';
@@ -84,6 +84,13 @@ async function getTabRecord(tabId: number): Promise<ResponseMap['getTabRecord']>
   return { tab, record };
 }
 
+/** Runs the archived-duplicates rule after operations that add archived records. Never fails the operation. */
+async function thenDedupe<T>(p: Promise<T>): Promise<T> {
+  const out = await p;
+  await dedupeArchived().catch((e) => console.warn('[fangio] dedupe failed', e));
+  return out;
+}
+
 export async function handleRequest(req: Request): Promise<unknown> {
   switch (req.type) {
     case 'getStatus':
@@ -93,13 +100,13 @@ export async function handleRequest(req: Request): Promise<unknown> {
     case 'saveSettings':
       return saveSettings(req.settings);
     case 'archive':
-      return runCloseOp({
+      return thenDedupe(runCloseOp({
         items: ids(req.recordIds).map((recordId) => ({ recordId })),
         targetState: 'archived',
         mode: 'manual',
         force: req.force === true,
         reason: typeof req.reason === 'string' && req.reason.trim() ? req.reason.trim() : 'Archivada manualmente',
-      });
+      }));
     case 'trash':
       return runCloseOp({
         items: ids(req.recordIds).map((recordId) => ({ recordId })),
@@ -109,7 +116,7 @@ export async function handleRequest(req: Request): Promise<unknown> {
         reason: typeof req.reason === 'string' && req.reason.trim() ? req.reason.trim() : 'Enviada a la papelera manualmente',
       });
     case 'archiveTab':
-      return archiveTab(int(req.tabId, 'tabId'), req.force === true);
+      return thenDedupe(archiveTab(int(req.tabId, 'tabId'), req.force === true));
     case 'reopen': {
       const o: Parameters<typeof reopenRecords>[0] = { recordIds: ids(req.recordIds), active: req.active === true };
       if (typeof req.windowId === 'number') o.windowId = req.windowId;
@@ -132,16 +139,16 @@ export async function handleRequest(req: Request): Promise<unknown> {
     case 'previewRules':
       return previewRules();
     case 'runRulesNow':
-      return runAutomation('manual');
+      return thenDedupe(runAutomation('manual'));
     case 'getImportPreview':
       return getImportPreview();
     case 'applyImport':
-      return applyImport(ids(req.archiveIds, 'archiveIds'), ids(req.trashIds, 'trashIds'), ids(req.protectIds, 'protectIds'));
+      return thenDedupe(applyImport(ids(req.archiveIds, 'archiveIds'), ids(req.trashIds, 'trashIds'), ids(req.protectIds, 'protectIds')));
     case 'skipOnboarding':
       await markOnboardingDone();
       return { ok: true };
     case 'importJson':
-      return importJson(req.data);
+      return thenDedupe(importJson(req.data));
     case 'markBackup':
       await markBackup();
       return { ok: true };

@@ -31,7 +31,7 @@ export default {
     const after = mem(b, 'S1 después del snapshot de instalación', ctx);
     const newExt = after.procs.filter((p) => p.type === 'extension' && !extensionPids(before).has(p.pid));
     ctx.shared.fangioExtPids = newExt.map((p) => p.pid);
-    c('extension id pinned by manifest key', r.id === 'domaedkeecbijcmbcjcfpjeabbdcmefb', r.id);
+    c('extension id assigned (no manifest key: derived from the folder)', /^[a-p]{32}$/.test(r.id), r.id);
     c('one record per trackable tab', st.records.length === tabs.length, `${st.records.length} records / ${tabs.length} tabs`);
     c('all records are install-snapshot and open', st.records.every((x) => x.source === 'install-snapshot' && x.state === 'open'));
     const perUrlTabs = new Map();

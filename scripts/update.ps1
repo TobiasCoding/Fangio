@@ -8,7 +8,8 @@
 
     Steps: query the GitHub releases API, compare with the local version, download the
     release zip and SHA256SUMS.txt, verify the SHA-256, extract to a temporary folder,
-    check that the new manifest is Fangio with the same public key (same extension id),
+    check that the new manifest is Fangio, keep the same folder (an unpacked extension's id
+    depends on its folder, so the archive stays with it),
     move the current files to a sibling backup folder ("<folder>.previous"), copy the new
     files in and restore the backup if anything fails.
 
@@ -82,7 +83,6 @@ function Test-FangioManifest($Manifest) {
     if ($null -eq $Manifest) { return $false }
     $names = @($Manifest.PSObject.Properties.Name)
     return ($names -contains 'name') -and ($Manifest.name -eq 'Fangio') -and
-        ($names -contains 'key') -and ([string]$Manifest.key).Length -gt 0 -and
         ($names -contains 'version')
 }
 
@@ -170,7 +170,7 @@ function Install-Files([string]$From, [string]$To) {
     $final = Join-Path $parent "$leaf.previous"
     if (Test-Path -LiteralPath $final) {
         $old = Read-Manifest $final
-        if ((Test-FangioManifest $old) -and $old.key -eq $script:LocalKey) {
+        if (Test-FangioManifest $old) {
             Remove-Item -LiteralPath $final -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
@@ -202,7 +202,6 @@ if (-not (Test-FangioManifest $localManifest)) {
     Die ('No encontr\u00E9 una instalaci\u00F3n de Fangio en {0} (falta manifest.json de Fangio).\n' +
         'Pas\u00E1 -InstallDir <carpeta> o instal\u00E1 con install.ps1.') $InstallDir
 }
-$script:LocalKey = [string]$localManifest.key
 $localVersion = [string]$localManifest.version
 $versionFile = Join-Path $InstallDir 'VERSION'
 if (Test-Path -LiteralPath $versionFile -PathType Leaf) {
@@ -232,9 +231,6 @@ $work = Join-Path ([IO.Path]::GetTempPath()) ('fangio-update-' + [guid]::NewGuid
 New-Item -ItemType Directory -Path $work | Out-Null
 try {
     $pkg = Get-VerifiedRelease $release $target $work
-    if ([string]$pkg.Manifest.key -ne $script:LocalKey) {
-        Die 'La clave (key) del paquete no coincide con la instalada: ser\u00EDa otra extensi\u00F3n con otra base de datos. Cancelado.'
-    }
     $backup = Install-Files $pkg.Dir $InstallDir
     Say ''
     Say 'Fangio actualizado: v{0} -> v{1}' @($localVersion, $target)

@@ -2,7 +2,7 @@
 // a message to the background and reports the BulkResult as a toast.
 
 import type { BulkResult, RecordEdit } from '../../shared/messages';
-import type { RulePreview } from '../../shared/types';
+import type { RulePreview, TabRecord } from '../../shared/types';
 import { errMsg, send } from '../common/api';
 import { confirmDialog, toast } from '../common/feedback';
 import { fmtNum, plural } from '../common/format';
@@ -194,28 +194,28 @@ export async function restoreRecords(ids: string[]): Promise<void> {
   }
 }
 
+/** Permanent deletion (only records in trash). No confirmation: the trash already was the safety net. */
 export async function purgeRecords(ids: string[]): Promise<boolean> {
   if (!ids.length) return false;
-  const ok = await confirmDialog({
-    title: `Eliminar definitivamente ${plural(ids.length, 'referencia', 'referencias')}`,
-    body: (
-      <p>
-        Esto <strong>no se puede deshacer</strong> (sólo se recupera desde una copia JSON). Las referencias desaparecen de la
-        base de datos.
-      </p>
-    ),
-    confirmLabel: 'Eliminar definitivamente',
-    danger: true,
-    requireText: 'ELIMINAR',
-  });
-  if (!ok) return false;
   try {
-    reportBulk(await send({ type: 'purge', recordIds: ids, confirm: 'ELIMINAR' }), { verb: 'Eliminadas', titleOf });
+    const res = await send({ type: 'purge', recordIds: ids, confirm: 'ELIMINAR' });
+    // Permanent: no "Deshacer" on the toast.
+    reportBulk({ ...res, actionId: undefined }, { verb: 'Eliminadas definitivamente', titleOf });
     return true;
   } catch (e) {
     fail('No se pudo eliminar', e);
     return false;
   }
+}
+
+/**
+ * Delete key / "Eliminar": records already in trash are deleted permanently, the rest go to the
+ * trash (closing their tab if open). No confirmation; going to the trash can be undone.
+ */
+export async function deleteRecords(records: readonly TabRecord[]): Promise<void> {
+  const purge = records.filter((r) => r.state === 'trash').map((r) => r.id);
+  const trash = records.filter((r) => r.state !== 'trash').map((r) => r.id);
+  await Promise.all([purgeRecords(purge), closeRecords(trash, 'trash')]);
 }
 
 export async function emptyTrash(count: number): Promise<void> {
@@ -229,11 +229,11 @@ export async function emptyTrash(count: number): Promise<void> {
     ),
     confirmLabel: 'Vaciar papelera',
     danger: true,
-    requireText: 'ELIMINAR',
   });
   if (!ok) return;
   try {
-    reportBulk(await send({ type: 'emptyTrash', confirm: 'ELIMINAR' }), { verb: 'Eliminadas', titleOf });
+    const res = await send({ type: 'emptyTrash', confirm: 'ELIMINAR' });
+    reportBulk({ ...res, actionId: undefined }, { verb: 'Eliminadas definitivamente', titleOf });
   } catch (e) {
     fail('No se pudo vaciar la papelera', e);
   }

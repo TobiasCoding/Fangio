@@ -107,13 +107,21 @@ Windows PowerShell 5.1 lee los scripts sin BOM con la página de códigos ANSI.
 - `.github/workflows/release.yml`: descrito arriba. Permisos: `contents: write`.
 - `.github/dependabot.yml`: actualizaciones semanales de npm y de GitHub Actions.
 
-## Clave de la extensión
+## ID de la extensión (sin `key`)
 
-`static/manifest.json` incluye la clave **pública** (`key`) que fija el ID
-`domaedkeecbijcmbcjcfpjeabbdcmefb`. Publicarla es seguro y necesario: sin ella, cada
-carpeta tendría otro ID y otra base de datos. La clave **privada** correspondiente no se
-necesita para distribuir la extensión descomprimida, se guarda fuera del repositorio y
-**nunca** debe commitearse (`*.pem` y `*.crx` están en `.gitignore`).
+Desde la v1.1.1 `static/manifest.json` **no** tiene `key`: la Chrome Web Store rechaza los
+paquetes que la incluyen, y el mismo zip del release sirve para la tienda y para instalar
+descomprimida. `npm run build` falla si alguien la vuelve a agregar.
+
+- Desde la tienda, el ID lo asigna la tienda y las actualizaciones son automáticas (Fangio no
+  consulta GitHub ni muestra el aviso de `update.ps1` si detecta `update_url` en el manifiesto
+  instalado).
+- Descomprimida, el ID depende de la carpeta. Los actualizadores (`update.*`) reemplazan los
+  archivos en la misma carpeta, así que el ID y la base se conservan.
+- Hasta la v1.1.0 el ID era `domaedkeecbijcmbcjcfpjeabbdcmefb` (fijado por la `key`). Pasar de
+  esa versión a la v1.1.1 requiere exportar e importar la copia JSON (ver INSTALL.md).
+
+Ninguna clave privada (`*.pem`) ni `*.crx` debe commitearse (están en `.gitignore`).
 
 ## Configuración recomendada del repositorio
 

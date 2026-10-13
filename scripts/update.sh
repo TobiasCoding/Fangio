@@ -3,7 +3,8 @@
 #
 # Run it from inside the installed extension folder (the one loaded with "Load unpacked"),
 # or pass --install-dir. It downloads the latest GitHub release, verifies its SHA-256,
-# checks the manifest (name "Fangio" and the same public key = same extension id), moves
+# checks the manifest (name "Fangio"; the folder stays the same, so the extension id and its
+# data do too), moves
 # the current files to "<folder>.previous" and copies the new ones in (restoring the
 # backup if anything fails). It never touches browser profile data.
 #
@@ -51,13 +52,12 @@ ver_cmp() {
   done
   echo 0
 }
-is_fangio() { [ -f "$1/manifest.json" ] && [ "$(json_str name "$1/manifest.json")" = "Fangio" ] && [ -n "$(json_str key "$1/manifest.json")" ]; }
+is_fangio() { [ -f "$1/manifest.json" ] && [ "$(json_str name "$1/manifest.json")" = "Fangio" ]; }
 
 [ -d "$INSTALL_DIR" ] || die "No existe la carpeta $INSTALL_DIR."
 INSTALL_DIR="$(cd "$INSTALL_DIR" && pwd -P)"
 case "$INSTALL_DIR" in /|"$HOME") die "Carpeta de instalación inválida: $INSTALL_DIR" ;; esac
 is_fangio "$INSTALL_DIR" || die "No encontré una instalación de Fangio en $INSTALL_DIR (falta manifest.json de Fangio). Usá --install-dir."
-LOCAL_KEY="$(json_str key "$INSTALL_DIR/manifest.json")"
 LOCAL_VERSION="$(json_str version "$INSTALL_DIR/manifest.json")"
 if [ -f "$INSTALL_DIR/VERSION" ]; then
   v="$(tr -d '[:space:]' < "$INSTALL_DIR/VERSION")"
@@ -103,8 +103,6 @@ mkdir -p "$NEW"
 unzip -q "$WORK/$ZIP" -d "$NEW"
 is_fangio "$NEW" || die "El paquete descargado no contiene un manifest.json de Fangio válido."
 [ "$(json_str version "$NEW/manifest.json")" = "$TARGET" ] || die "El paquete no es la versión $TARGET."
-[ "$(json_str key "$NEW/manifest.json")" = "$LOCAL_KEY" ] \
-  || die "La clave (key) del paquete no coincide con la instalada: sería otra extensión con otra base de datos. Cancelado."
 [ -f "$NEW/background.js" ] || die "Al paquete le falta background.js."
 
 # Current files go to a new sibling backup folder; only after a successful update does it
@@ -128,7 +126,7 @@ cp -R -- "$NEW"/* "$INSTALL_DIR"/ || { restore copy; die "No pude copiar los arc
 chmod +x "$INSTALL_DIR/update.sh" 2>/dev/null || true
 
 FINAL="$INSTALL_DIR.previous"
-if [ -e "$FINAL" ] && is_fangio "$FINAL" && [ "$(json_str key "$FINAL/manifest.json")" = "$LOCAL_KEY" ]; then
+if [ -e "$FINAL" ] && is_fangio "$FINAL"; then
   rm -rf -- "$FINAL"
 fi
 if [ ! -e "$FINAL" ] && mv -- "$BACKUP" "$FINAL" 2>/dev/null; then BACKUP="$FINAL"; fi

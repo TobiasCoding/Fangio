@@ -14,7 +14,7 @@ import {
   type Settings,
   type TabRecord,
 } from '../shared/types';
-import { getAction, getRecordsByIds, getSettings, putActions, putRecords, putSettings } from './db';
+import { getAction, getRecordsByIds, getRecordsByState, getSettings, putActions, putRecords, putSettings } from './db';
 import { dbLock } from './mutex';
 import { newAction } from './records';
 import { broadcast, recordsChanged } from './runtime';
@@ -289,7 +289,32 @@ function withPreviousUrl(list: readonly string[], url: string, current: string):
 }
 
 /**
- * Applies a JSON backup: 'open' records become 'archived' (they have no tab);
+ * Pure: an imported record that was open in the backup, folded into the record of the same URL
+ * that is open in this browser (e.g. the backup comes from another installation, whose open tabs
+ * this one already captured with other ids). The open record keeps its id, state and tab; it gains
+ * the backup's tags, note, project, marks and history.
+ */
+export function foldIntoOpen(target: TabRecord, imp: TabRecord): void {
+  target.tags = normalizeTags([...target.tags, ...imp.tags]);
+  const notes = [target.note, imp.note].map((n) => n.trim()).filter(Boolean);
+  target.note = [...new Set(notes)].join('\n\n').slice(0, MAX_NOTE_LENGTH);
+  target.pending = target.pending || imp.pending;
+  target.protected = target.protected || imp.protected;
+  if (!target.project) target.project = imp.project;
+  target.createdAt = Math.min(target.createdAt, imp.createdAt);
+  if (imp.openedAt !== undefined && (target.openedAt === undefined || imp.openedAt < target.openedAt)) target.openedAt = imp.openedAt;
+  if (imp.lastAccessedAt !== undefined && (target.lastAccessedAt === undefined || imp.lastAccessedAt > target.lastAccessedAt)) {
+    target.lastAccessedAt = imp.lastAccessedAt;
+  }
+  target.reopenCount = Math.max(target.reopenCount, imp.reopenCount);
+  target.previousUrls = [...new Set([...target.previousUrls, ...imp.previousUrls])].filter((u) => u !== target.url).slice(0, MAX_PREVIOUS_URLS);
+  target.mergedFrom = [...new Set([...target.mergedFrom, imp.id, ...imp.mergedFrom])].filter((id) => id !== target.id);
+  if (!target.origin.groupTitle && imp.origin.groupTitle) target.origin = { ...target.origin, groupTitle: imp.origin.groupTitle, ...(imp.origin.groupColor ? { groupColor: imp.origin.groupColor } : {}) };
+}
+
+/**
+ * Applies a JSON backup: 'open' records become 'archived' (they have no tab), unless the same
+ * URL is open here under another id (see foldIntoOpen);
  * merge by id where the newest updatedAt wins; never deletes anything. Records
  * that are currently open in this browser keep their state and live binding.
  */
@@ -300,8 +325,25 @@ export async function importJson(data: unknown): Promise<ImportJsonResult> {
   await dbLock.run(async () => {
     const now = Date.now();
     const existing = await getRecordsByIds(parsed.records.map((r) => r.id));
+    // Records open here that no backup record matches by id, by URL (each one absorbs at most one).
+    const importedIds = new Set(parsed.records.map((r) => r.id));
+    const openByUrl = new Map<string, TabRecord[]>();
+    for (const r of await getRecordsByState('open')) {
+      if (r.pendingClose || importedIds.has(r.id)) continue;
+      const list = openByUrl.get(r.url);
+      if (list) list.push(r);
+      else openByUrl.set(r.url, [r]);
+    }
     const toWrite: TabRecord[] = [];
     for (const imp of parsed.records) {
+      const target = imp.state === 'open' && !existing.has(imp.id) ? openByUrl.get(imp.url)?.shift() : undefined;
+      if (target) {
+        foldIntoOpen(target, imp);
+        target.updatedAt = now;
+        toWrite.push(target);
+        result.updated++;
+        continue;
+      }
       if (imp.state === 'open') {
         imp.state = 'archived';
         imp.archivedAt = now;

@@ -62,6 +62,7 @@ function cleanDist() {
 function copyAssets() {
   const version = packageVersion();
   const manifest = readJson(resolve(ROOT, 'static/manifest.json'));
+  if ('key' in manifest) fail('static/manifest.json no debe tener "key": la Chrome Web Store rechaza el paquete.');
   manifest.version = version;
   writeFileSync(join(DIST, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
   writeFileSync(join(DIST, 'VERSION'), `${version}\n`);

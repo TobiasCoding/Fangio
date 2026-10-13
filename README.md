@@ -190,8 +190,11 @@ Arriba a la derecha del panel elegís cómo ver el mismo conjunto filtrado. La b
 filtros, la selección y las acciones funcionan igual en todas.
 
 - **Lista**: compacta y rápida, con atajos de teclado.
-- **Tarjetas**: cada referencia con su **miniatura** (si activaste las miniaturas) o un
-  póster con el color y el ícono del sitio.
+- **Tarjetas**: una tarjeta compacta por referencia (ícono y sitio, título, marcas y fecha en
+  un solo bloque). Por defecto es minimalista, sin imagen ni colores; con **Diseño de
+  tarjetas** elegís si mostrar la **miniatura** (si activaste las miniaturas), el tamaño
+  (compacta o cómoda), el sitio, la fecha, la URL completa, las marcas y etiquetas, el estado
+  y los colores por sitio. La elección se recuerda en este navegador.
 - **Línea de tiempo**: agrupada por día y por **sesión de trabajo** (actividad sin pausas de
   más de 45 minutos), con un histograma de actividad por hora. Un clic en la casilla de un
   día o de una sesión selecciona todas sus referencias (por ejemplo, para archivar «la sesión
@@ -242,10 +245,18 @@ su motivo, por ejemplo: «Archivada automáticamente: sin consultar hace 26 h (i
 
 ## Duplicados
 
-La vista **Duplicados** agrupa las referencias con **exactamente la misma URL**. Nada se
-fusiona solo: elegís cuál conservar y **Fusionar** le suma las etiquetas, notas, marcas de
-pendiente/protegida y fechas de las demás, que pasan a la papelera (recuperables y con
-deshacer). Una pestaña abierta no se fusiona en otra: archivala primero.
+La vista **Duplicados** agrupa las referencias con **exactamente la misma URL**. Elegís cuál
+conservar y **Fusionar** le suma las etiquetas, notas, marcas de pendiente/protegida y fechas
+de las demás, que pasan a la papelera (recuperables y con deshacer). Una pestaña abierta no
+se fusiona en otra: archivala primero.
+
+**Regla de duplicados archivados** (activada por defecto, en **Reglas**): si quedan dos o más
+**archivadas** con la URL idéntica y **sin datos propios** (nota, etiquetas, proyecto,
+pendiente o protegida), Fangio deja una sola —la que tiene datos, o si no la usada más
+recientemente— y manda las demás a la papelera. Las que tienen datos nunca se fusionan solas.
+Se aplica al archivar, al importar y en el mantenimiento periódico. Para recuperar las copias,
+desactivá la regla y después deshacé la fusión desde **Registro** (con la regla activa se
+vuelven a fusionar).
 
 ## Papelera y eliminación definitiva
 
@@ -256,8 +267,13 @@ Archivar **no** es borrar. La papelera es un paso intermedio separado:
 - Desde la papelera podés **restaurar** (vuelve a archivadas) en cualquier momento.
 - **Eliminación definitiva automática**: lo que lleva más de **30 días** en la papelera se
   elimina (configurable; **0 = nunca**). Sólo afecta a la papelera, nunca a lo archivado.
-- **Vaciar papelera** o **Eliminar definitivamente** a mano piden escribir `ELIMINAR`
-  para confirmar.
+- **Supr** sobre la referencia que tocaste (la del panel de detalle) o sobre la selección:
+  si no está en la papelera, va a la papelera (y se cierra su pestaña si estaba abierta); si
+  ya está en la papelera, se **elimina definitivamente**. Sin confirmaciones: lo primero se
+  deshace desde el aviso o desde Registro; lo segundo no se puede deshacer. En Mac,
+  `Cmd+Borrar`.
+- **Eliminar definitivamente** (botón) tampoco pide confirmación; **Vaciar papelera** pide
+  una confirmación simple porque afecta a todo lo que hay en ella.
 
 ## Registro y deshacer
 
@@ -318,9 +334,11 @@ miniaturas automáticas.
 | `activeTab` | Tomar la miniatura de la pestaña en la que abrís el popup o usás el atajo de archivar (sin advertencia). |
 | `<all_urls>` (**opcional**) | Sólo si activás las miniaturas automáticas: capturar la pestaña visible con `captureVisibleTab`. Chrome lo muestra como «leer y cambiar tus datos en todos los sitios»; Fangio no lo usa para nada más y lo devuelve al desactivar la opción. |
 
-El manifiesto incluye una clave pública (`key`) que fija el ID de la extensión
-(`domaedkeecbijcmbcjcfpjeabbdcmefb`), para que cada actualización sea reconocida como la
-misma extensión con la misma base de datos.
+Desde la v1.1.1 el manifiesto **no** incluye `key` (la Chrome Web Store la rechaza). Instalada
+desde la tienda, Fangio tiene el ID que le asigna la tienda y se actualiza sola. Cargada
+descomprimida, Chrome le da un ID que depende de la carpeta: el actualizador reemplaza los
+archivos en esa misma carpeta, así que el ID y la base de datos se conservan. **No muevas la
+carpeta** sin exportar antes una copia JSON (ver [Instalación](docs/INSTALL.md)).
 
 ## Privacidad
 

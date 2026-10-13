@@ -182,8 +182,8 @@ describe('import wizard', () => {
     expect(res.failed).toEqual([]);
     const recs = await w.db.getAllRecords();
     const rid = (id: string) => recs.find((r) => r.id === id)!;
-    expect(rid(by(d1.id).recordId).state).toBe('archived');
-    expect(rid(by(d2.id).recordId).state).toBe('archived');
+    // Archived duplicates without data of their own: the rule keeps one, the other goes to the trash.
+    expect([rid(by(d1.id).recordId).state, rid(by(d2.id).recordId).state].sort()).toEqual(['archived', 'trash']);
     expect(rid(by(gpt.id).recordId).state).toBe('trash');
     expect(rid(by(p.id).recordId).state).toBe('open');
     expect(rid(by(p.id).recordId).protected).toBe(true);

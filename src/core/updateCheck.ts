@@ -49,7 +49,17 @@ function currentVersion(): string {
   }
 }
 
+/** Installed from the Chrome Web Store (the store adds update_url): the store updates it, not GitHub. */
+export function installedFromStore(): boolean {
+  try {
+    return typeof (chrome.runtime.getManifest() as { update_url?: unknown }).update_url === 'string';
+  } catch {
+    return false;
+  }
+}
+
 export async function getStoredUpdate(): Promise<StatusInfo['update']> {
+  if (installedFromStore()) return null;
   try {
     return toStatus(await getKv<UpdateInfo>('updateInfo'), currentVersion());
   } catch {
@@ -59,6 +69,7 @@ export async function getStoredUpdate(): Promise<StatusInfo['update']> {
 
 /** Only when settings.updateCheck (or force = explicit user click). */
 export async function checkForUpdate(opts: { force?: boolean } = {}): Promise<StatusInfo['update']> {
+  if (installedFromStore()) return null;
   try {
     const settings = await getSettings();
     if (!settings.updateCheck && !opts.force) return await getStoredUpdate();

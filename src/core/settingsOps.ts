@@ -21,6 +21,7 @@ const LABELS: Partial<Record<keyof Settings, string>> = {
   reopenConcurrency: 'reaperturas simultáneas',
   discardAfterBulkReopen: 'descartar tras reabrir',
   restoreGroups: 'restaurar grupos',
+  dedupeArchived: 'duplicados archivados',
   updateCheck: 'buscar actualizaciones',
   logRetentionDays: 'retención del registro',
 };

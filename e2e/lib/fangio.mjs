@@ -1,10 +1,15 @@
 // Fangio-specific helpers shared by scenarios: install, dashboard, messages, waits.
-import { FANGIO_ID, helperId, launchBrowser, loadUnpacked, sleep, waitFor } from './browser.mjs';
+import { FANGIO_ID, fangioId, helperId, launchBrowser, loadUnpacked, setFangioId, sleep, waitFor } from './browser.mjs';
 import { readState, TRACKABLE } from './checks.mjs';
 import { processTree } from './mem.mjs';
 
-export const FANGIO = FANGIO_ID;
-export const DASH = `chrome-extension://${FANGIO_ID}/dashboard.html`;
+// Live bindings, set once Fangio is loaded (its id depends on the dist/ folder; see browser.mjs).
+export { FANGIO_ID as FANGIO } from './browser.mjs';
+export let DASH = '';
+function rememberId(id) {
+  setFangioId(id);
+  DASH = `chrome-extension://${id}/dashboard.html`;
+}
 
 /** Sends a Request to Fangio's background from a Fangio page (same path the UI uses). */
 export async function sendMsg(page, msg, timeoutMs = 600000) {
@@ -22,7 +27,7 @@ export function sendNoWait(page, msg) {
 }
 
 export async function openDashboard(b, hash = '#/lista') {
-  const page = await b.openPage(`${DASH}${hash}`);
+  const page = await b.openPage(`chrome-extension://${FANGIO_ID}/dashboard.html${hash}`);
   await page.front();
   await page.waitFor(() => document.readyState === 'complete' && !!document.querySelector('.topbar'), undefined, {
     timeout: 60000,
@@ -36,6 +41,7 @@ export async function launchProfile(ctx, profileDir, { withFangio = false, resto
   const loadExtensions = [ctx.helperPath, ...(withFangio ? [ctx.dist] : [])];
   const b = await launchBrowser({ profileDir, loadExtensions, restore, headless: ctx.headless });
   const helper = b.ext(await helperId(b));
+  if (withFangio) rememberId(await fangioId(b));
   if (expectTabs) {
     await waitFor(async () => (await helper.eval(async () => (await chrome.tabs.query({})).length)) >= expectTabs, {
       timeout: 120000,
@@ -82,6 +88,7 @@ export async function trackableTabs(helper) {
 export async function installAndSnapshot(ctx, b, expected) {
   const t0 = Date.now();
   const id = await loadUnpacked(b, ctx.dist);
+  rememberId(id);
   const loadMs = Date.now() - t0;
   let polls = 0;
   const st = await waitFor(

@@ -79,9 +79,9 @@ Qué hace el actualizador, paso a paso:
    `https://api.github.com/repos/TobiasCoding/Fangio/releases/latest`.
 2. Si hay una versión más nueva, descarga `fangio-vX.Y.Z.zip` y `SHA256SUMS.txt` a una
    carpeta temporal y **verifica el SHA-256**. Si no coincide, no instala nada.
-3. Extrae el zip y comprueba que el `manifest.json` nuevo sea de Fangio, de esa versión y
-   con **la misma clave (`key`)** que la instalada; una clave distinta sería otra extensión
-   con otra base de datos, así que cancela.
+3. Extrae el zip y comprueba que el `manifest.json` nuevo sea de Fangio y de esa versión.
+   Los archivos nuevos van a **la misma carpeta**: el ID de una extensión descomprimida
+   depende de su carpeta, así que la extensión (y su base de datos) sigue siendo la misma.
 4. Mueve los archivos actuales a una carpeta hermana de respaldo, copia los nuevos y, si
    algo falla, restaura los anteriores. Al terminar, la versión anterior queda en
    `<carpeta>.previous` (por ejemplo `...\Fangio\extension.previous`).
@@ -120,9 +120,23 @@ comunes de Windows ni de macOS:
   Chrome usa los archivos de la carpeta tal cual y los vuelve a leer al tocar **Recargar**.
 
 Por eso el circuito de Fangio es: aviso diario dentro de la extensión → actualizador local
-que reemplaza los archivos de forma verificada → **Recargar**. Como la `key` del manifiesto
-fija el ID de la extensión, la versión recargada es la misma extensión y conserva su base
-de datos.
+que reemplaza los archivos de forma verificada → **Recargar**. Como la carpeta no cambia, el
+ID de la extensión tampoco: la versión recargada es la misma extensión y conserva su base de
+datos. (Instalada desde la Chrome Web Store, la tienda la actualiza sola y no hace falta nada
+de esto.)
+
+### Pasar de la v1.1.0 (o anterior) a la v1.1.1
+
+Hasta la v1.1.0 el manifiesto tenía una clave (`key`) que fijaba el ID. La v1.1.1 ya no la
+tiene, así que **es otra extensión con otra base de datos** y el actualizador de la v1.1.0 se
+niega a instalarla («la clave no coincide»). Para pasar sin perder nada:
+
+1. En la versión vieja: **Panel → Copias → Exportar copia JSON**.
+2. Quitá la versión vieja en `chrome://extensions` (o dejala desactivada hasta comprobar la
+   nueva).
+3. Instalá la v1.1.1 (descomprimida, con `install.ps1`, o desde la Chrome Web Store).
+4. En la nueva: **Copias → Importar JSON** con el archivo del paso 1. Las pestañas que siguen
+   abiertas se unen a su registro (no quedan duplicadas) y recuperan notas, etiquetas y fechas.
 
 ## Desinstalar, mover o cambiar de equipo
 
@@ -143,5 +157,6 @@ de datos.
   extensiones descomprimidas; podés cerrarlo.
 - **PowerShell dice que la ejecución de scripts está deshabilitada**: usá `update.cmd` o
   `powershell -NoProfile -ExecutionPolicy Bypass -File ...` (sólo afecta a ese comando).
-- **El actualizador dice que la clave no coincide**: esa carpeta tiene otra copia (por
-  ejemplo, una compilación propia con otra `key`). No continúes: exportá y reinstalá.
+- **El actualizador de la v1.1.0 dice que la clave no coincide** al pasar a la v1.1.1: es
+  esperable (la v1.1.1 ya no tiene `key`). Seguí los pasos de «Pasar de la v1.1.0 (o
+  anterior) a la v1.1.1».

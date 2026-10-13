@@ -17,6 +17,8 @@ describe('bulk (fake chrome + fake-indexeddb; timings are NOT real-browser numbe
     const tSnapshot = performance.now() - t0;
     const recs = await w.db.getAllRecords();
     expect(recs).toHaveLength(850);
+    // This test checks the close pipeline: the archived-duplicates rule (repeated URLs here) stays off.
+    await w.call({ type: 'saveSettings', settings: { ...(await w.db.getSettings()), dedupeArchived: false } });
 
     const t1 = performance.now();
     const res = await w.call({ type: 'archive', recordIds: recs.map((r) => r.id) });

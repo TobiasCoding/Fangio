@@ -10,7 +10,7 @@ import { useStore } from '../../common/store';
 import { Favicon, Spinner, StateBadge } from '../../common/widgets';
 import { recordsStore, settingsStore } from '../data';
 import { FacetPicker } from '../Facets';
-import { closeRecords, editRecords, emptyTrash, purgeRecords, reopenRecords, restoreRecords } from '../ops';
+import { closeRecords, deleteRecords, editRecords, emptyTrash, purgeRecords, reopenRecords, restoreRecords } from '../ops';
 import {
   countBy,
   DEFAULT_FILTERS,
@@ -24,7 +24,7 @@ import {
 } from '../search';
 import type { Filters, SortDir, SortKey, StateFilter } from '../search';
 import { VirtualList } from '../VirtualList';
-import { CardGrid } from './CardGrid';
+import { CardGrid, CardPrefsMenu } from './CardGrid';
 import { Drawer } from './Drawer';
 import { Timeline } from './Timeline';
 import { TopicsView } from './Topics';
@@ -144,11 +144,36 @@ export function ListView() {
     setEnsure({ index: n, seq: Date.now() + Math.random() });
   };
 
-  // Global shortcuts: "/" focuses search, Esc closes drawer or clears selection.
+  /**
+   * Supr: deletes the selection, or else the record open in the detail panel, or else the one
+   * under the keyboard cursor. No confirmation: trash -> deleted permanently, the rest -> trash.
+   * The detail panel / cursor move on to the next record so Supr can be pressed again.
+   */
+  const deleteCurrent = () => {
+    const targets = selection.size ? selectedRecs : [byId.get(drawerId ?? '') ?? filtered[cursor]].filter((r): r is TabRecord => !!r);
+    if (!targets.length) return;
+    const gone = new Set(targets.map((r) => r.id));
+    const last = Math.max(...targets.map((r) => indexOf.get(r.id) ?? -1));
+    const rest = filtered.filter((r) => !gone.has(r.id));
+    const next = last >= 0 ? (filtered.slice(last + 1).find((r) => !gone.has(r.id)) ?? rest[rest.length - 1]) : undefined;
+    if (drawerId && gone.has(drawerId)) setDrawerId(next?.id ?? null);
+    if (next) setCursor(rest.indexOf(next));
+    if (selection.size) clearSelection();
+    void deleteRecords(targets);
+  };
+  // Read through a ref: a Supr pressed right after a click must see that click's state even
+  // before the effect below re-subscribes.
+  const deleteRef = useRef(deleteCurrent);
+  deleteRef.current = deleteCurrent;
+
+  // Global shortcuts: "/" focuses search, Esc closes drawer or clears selection, Supr deletes.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (document.querySelector('dialog[open]')) return;
-      if (e.key === '/' && !isTypingTarget(e.target) && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      if ((e.key === 'Delete' || (e.key === 'Backspace' && e.metaKey)) && !isTypingTarget(e.target) && !e.ctrlKey && !e.altKey) {
+        e.preventDefault();
+        deleteRef.current();
+      } else if (e.key === '/' && !isTypingTarget(e.target) && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
         searchRef.current?.focus();
         searchRef.current?.select();
@@ -223,7 +248,7 @@ export function ListView() {
     trash: () => {
       const ids = selectedRecs.filter((r) => r.state !== 'trash').map((r) => r.id);
       if (!ids.length) return void toast('Ya están todas en la papelera.', { kind: 'info' });
-      void closeRecords(ids, 'trash', { confirm: true }).then((r) => r && clearSelection());
+      void closeRecords(ids, 'trash').then((r) => r && clearSelection());
     },
     restore: () => {
       const ids = selectedRecs.filter((r) => r.state === 'trash').map((r) => r.id);
@@ -543,6 +568,7 @@ export function ListView() {
             </button>
           )}
           <span class="spacer" />
+          {prefs.view === 'cards' && <CardPrefsMenu />}
           <label class="row sort">
             <span class="muted">Orden</span>
             <select
@@ -653,9 +679,9 @@ export function ListView() {
             {filters.state !== 'trash' && prefs.view !== 'topics' && (
               <span class="faint hide-narrow">
                 {prefs.view === 'list'
-                  ? 'Clic: detalle · doble clic o Enter: reabrir · Mayús+clic: rango · Espacio: seleccionar'
+                  ? 'Clic: detalle · doble clic o Enter: reabrir · Mayús+clic: rango · Espacio: seleccionar · Supr: eliminar'
                   : prefs.view === 'cards'
-                    ? 'Clic: detalle · doble clic: reabrir · Ctrl+clic: seleccionar · las miniaturas se activan en Reglas'
+                    ? 'Clic: detalle · doble clic: reabrir · Ctrl+clic: seleccionar · Supr: eliminar'
                     : 'Agrupado por día y por sesión de trabajo (pausas de más de 45 min) · el orden y la fecha siguen a «Orden»'}
               </span>
             )}

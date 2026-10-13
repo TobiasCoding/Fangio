@@ -1,10 +1,11 @@
 // Duplicates: references with the IDENTICAL url string (no normalization: query
-// strings and fragments make URLs distinct). Nothing is merged automatically.
+// strings and fragments make URLs distinct). The only automatic merge is the
+// "duplicados archivados" rule (dedupeArchived): archived copies without data of their own.
 
 import { MAX_NOTE_LENGTH } from '../shared/constants';
 import type { BulkResult } from '../shared/messages';
 import type { RecordPatch, TabRecord } from '../shared/types';
-import { getRecordsByIds, putAction, putRecords } from './db';
+import { getRecordsByIds, getRecordsByState, getSettings, putAction, putRecords } from './db';
 import { dbLock } from './mutex';
 import { maxDefined, newAction, stateSnapshot } from './records';
 import { broadcast, recordsChanged, rt } from './runtime';
@@ -114,5 +115,72 @@ export async function mergeRecords(keepId: string, mergeIds: string[]): Promise<
   recordsChanged(result.done);
   broadcast({ type: 'actions' });
   result.ok = result.failed.length === 0 && result.done.length > 0;
+  return result;
+}
+
+// ------------------------------------------------------------------ rule: archived duplicates
+
+/** Data the user entered on the record (the detail panel's fields). */
+export function hasUserData(r: TabRecord): boolean {
+  return r.note.trim() !== '' || r.tags.length > 0 || r.project !== '' || r.pending || r.protected;
+}
+
+function lastUsed(r: TabRecord): number {
+  return r.lastAccessedAt ?? r.archivedAt ?? r.createdAt;
+}
+
+/**
+ * Pure: groups of archived records with the identical url. In each group, the records without
+ * user data are redundant and merge into the one kept: the most recently used record with user
+ * data, or else the most recently used one. Records with user data are never merged by the rule.
+ * Records in an operation (busy / pendingClose) are left alone.
+ */
+export function planArchivedDedupe(records: readonly TabRecord[], busy: { has(id: string): boolean } = new Set<string>()): { keep: TabRecord; merge: TabRecord[] }[] {
+  const free = records.filter((r) => r.state === 'archived' && !r.pendingClose && !busy.has(r.id));
+  const out: { keep: TabRecord; merge: TabRecord[] }[] = [];
+  for (const g of groupDuplicates(free)) {
+    const byUse = [...g.records].sort((a, b) => lastUsed(b) - lastUsed(a) || b.updatedAt - a.updatedAt);
+    const keep = byUse.find(hasUserData) ?? byUse[0]!;
+    const merge = byUse.filter((r) => r !== keep && !hasUserData(r));
+    if (merge.length) out.push({ keep, merge });
+  }
+  return out;
+}
+
+/** Applies the dedupeArchived rule (one undoable 'merge' action per run). Null when off or nothing to do. */
+export async function dedupeArchived(): Promise<BulkResult | null> {
+  if (!(await getSettings()).dedupeArchived) return null;
+  const result: BulkResult = { ok: false, done: [], skipped: [], failed: [] };
+  await dbLock.run(async () => {
+    const plans = planArchivedDedupe(await getRecordsByState('archived'), rt.busyRecords);
+    if (!plans.length) return;
+    const now = Date.now();
+    const before: Record<string, RecordPatch> = {};
+    const keeps: TabRecord[] = [];
+    const merged: TabRecord[] = [];
+    for (const p of plans) {
+      const m = planMerge(p.keep, p.merge, now);
+      for (const x of m.merged) x.lastReason = `Duplicada archivada sin datos propios: se conserva «${p.keep.title}»`;
+      Object.assign(before, m.before);
+      keeps.push(m.keep);
+      merged.push(...m.merged);
+    }
+    await putRecords([...keeps, ...merged]);
+    const action = newAction('merge', {
+      auto: true,
+      reason: `Regla de duplicados archivados: ${merged.length} copias sin datos propios enviadas a la papelera (queda una por URL)`,
+      recordIds: [...keeps.map((k) => k.id), ...merged.map((m) => m.id)],
+      before,
+      undoable: true,
+    });
+    await putAction(action);
+    result.done.push(...action.recordIds);
+    result.actionId = action.id;
+  });
+  if (!result.done.length) return null;
+  recordsChanged(result.done);
+  broadcast({ type: 'actions' });
+  broadcast({ type: 'status' });
+  result.ok = true;
   return result;
 }

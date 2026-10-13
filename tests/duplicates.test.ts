@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { groupDuplicates, planMerge } from '../src/core/duplicates';
+import { groupDuplicates, hasUserData, planArchivedDedupe, planMerge } from '../src/core/duplicates';
 import type { TabRecord } from '../src/shared/types';
 import { freshBrowser, idle, startWorker } from './helpers/env';
 
@@ -97,5 +97,70 @@ describe('merge', () => {
     expect((await w.db.getRecord(o2!.id))!.state).toBe('archived');
     recs = await w.db.getAllRecords();
     expect(recs).toHaveLength(4);
+  });
+});
+
+describe('rule: archived duplicates without data of their own', () => {
+  it('plans one survivor per URL: the most recently used one with user data, else the most recent', () => {
+    const plans = planArchivedDedupe([
+      rec('a1', 'https://a.com/', { lastAccessedAt: 10 }),
+      rec('a2', 'https://a.com/', { lastAccessedAt: 30 }),
+      rec('a3', 'https://a.com/', { lastAccessedAt: 20 }),
+      rec('b1', 'https://b.com/', { lastAccessedAt: 50 }),
+      rec('b2', 'https://b.com/', { lastAccessedAt: 10, note: 'importante' }),
+      rec('c1', 'https://c.com/', { tags: ['x'] }),
+      rec('c2', 'https://c.com/', { project: 'P' }),
+      rec('d1', 'https://d.com/'),
+      rec('d2', 'https://d.com/', { state: 'open' }),
+      rec('e1', 'https://e.com/'),
+      rec('e2', 'https://e.com/', { pendingClose: { opId: 'o', tabId: 1, sessionId: 's', expectedUrl: 'https://e.com/', targetState: 'archived', reason: '', at: 1 } }),
+      rec('f1', 'https://f.com/'),
+      rec('f2', 'https://f.com/'),
+    ], new Set(['f2']));
+    const by = new Map(plans.map((p) => [p.keep.id, p.merge.map((m) => m.id).sort()]));
+    expect(by.get('a2')).toEqual(['a1', 'a3']);
+    expect(by.get('b2')).toEqual(['b1']); // the one with a note survives
+    expect(plans.some((p) => p.keep.id.startsWith('c'))).toBe(false); // both have data: never merged
+    expect(plans.some((p) => p.keep.id.startsWith('d'))).toBe(false); // open copies are not archived duplicates
+    expect(plans.some((p) => p.keep.id.startsWith('e'))).toBe(false); // in the middle of a close
+    expect(plans.some((p) => p.keep.id.startsWith('f'))).toBe(false); // busy
+    expect(hasUserData(rec('p', 'u', { pending: true }))).toBe(true);
+    expect(hasUserData(rec('n', 'u', { note: '  ' }))).toBe(false);
+  });
+
+  async function twoArchived(dedupeArchived: boolean) {
+    const fc = freshBrowser();
+    fc.addTab({ url: 'https://same.example/', lastAccessed: 1000 }, { silent: true });
+    fc.addTab({ url: 'https://same.example/', lastAccessed: 2000 }, { silent: true });
+    fc.addTab({ url: 'https://other.example/' }, { silent: true });
+    const w = await startWorker(fc);
+    await idle(w);
+    await w.call({ type: 'saveSettings', settings: { ...(await w.db.getSettings()), dedupeArchived } });
+    const recs = await w.db.getAllRecords();
+    const res = await w.call({ type: 'archive', recordIds: recs.map((r) => r.id) });
+    await idle(w);
+    expect(res.done).toHaveLength(3);
+    return { w, recs };
+  }
+
+  it('archiving two identical tabs keeps one archived and sends the other to the trash (undoable)', async () => {
+    const { w } = await twoArchived(true);
+    const same = (await w.db.getAllRecords()).filter((r) => r.url === 'https://same.example/');
+    const kept = same.find((r) => r.state === 'archived')!;
+    const gone = same.find((r) => r.state === 'trash')!;
+    expect(kept && gone).toBeTruthy();
+    expect(kept.lastAccessedAt).toBe(2000);
+    expect(kept.mergedFrom).toEqual([gone.id]);
+    expect(gone.lastReason).toMatch(/sin datos propios/);
+    const action = (await w.db.getActions()).find((a) => a.kind === 'merge')!;
+    expect(action.auto).toBe(true);
+    await w.call({ type: 'undo', actionId: action.id });
+    expect((await w.db.getRecord(gone.id))!.state).toBe('archived');
+  });
+
+  it('does nothing when the rule is off', async () => {
+    const { w } = await twoArchived(false);
+    const same = (await w.db.getAllRecords()).filter((r) => r.url === 'https://same.example/');
+    expect(same.map((r) => r.state)).toEqual(['archived', 'archived']);
   });
 });

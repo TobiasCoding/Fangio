@@ -29,8 +29,10 @@ export default {
     const page = await openDashboard(b, '#/lista');
     ctx.shared.main.page = page;
     // Site exclusion for the localhost pages (default exclusions are real sites we cannot serve).
+    // The archived-duplicates rule is off: these scenarios count records per tab (and S9 merges
+    // duplicates by hand); the rule itself is covered by the unit tests.
     const s0 = await sendMsg(page, { type: 'getSettings' });
-    await sendMsg(page, { type: 'saveSettings', settings: { ...s0, siteExclusions: [...s0.siteExclusions, 'localhost'] } });
+    await sendMsg(page, { type: 'saveSettings', settings: { ...s0, siteExclusions: [...s0.siteExclusions, 'localhost'], dedupeArchived: false } });
     const tNav = Date.now();
     await page.goto(`${DASH}#/importar`);
     const sum0 = await page.waitFor(

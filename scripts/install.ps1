@@ -70,7 +70,6 @@ function Test-FangioManifest($Manifest) {
     if ($null -eq $Manifest) { return $false }
     $names = @($Manifest.PSObject.Properties.Name)
     return ($names -contains 'name') -and ($Manifest.name -eq 'Fangio') -and
-        ($names -contains 'key') -and ([string]$Manifest.key).Length -gt 0 -and
         ($names -contains 'version')
 }
 

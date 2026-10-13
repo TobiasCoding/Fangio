@@ -108,6 +108,41 @@ describe('export / import', () => {
     expect(r.note).toBe('from backup');
   });
 
+  it('backup of another installation: its open records fold into the same URLs open here (no duplicates)', async () => {
+    // Old installation: two open tabs (one with a note), one archived.
+    const old = freshBrowser();
+    old.addTab({ url: 'https://keep.example/' }, { silent: true });
+    old.addTab({ url: 'https://noted.example/' }, { silent: true });
+    old.addTab({ url: 'https://gone.example/' }, { silent: true });
+    const w1 = await startWorker(old);
+    await idle(w1);
+    const o = await w1.db.getAllRecords();
+    const byUrl = (list: TabRecord[], u: string) => list.find((r) => r.url === u)!;
+    await w1.call({ type: 'updateRecords', recordIds: [byUrl(o, 'https://noted.example/').id], edit: { note: 'leer', setTags: ['t'] } });
+    await w1.call({ type: 'archive', recordIds: [byUrl(o, 'https://gone.example/').id] });
+    const file = JSON.parse(JSON.stringify(buildExport(await w1.db.getAllRecords(), await w1.db.getSettings(), [], '1.1.0')));
+
+    // New installation (another extension id = empty database) with the same tabs still open.
+    const fc = freshBrowser();
+    fc.addTab({ url: 'https://keep.example/' }, { silent: true });
+    fc.addTab({ url: 'https://noted.example/' }, { silent: true });
+    const w = await startWorker(fc);
+    await idle(w);
+    const fresh = await w.db.getAllRecords();
+    const res = await w.call({ type: 'importJson', data: file });
+    expect(res).toMatchObject({ added: 1, updated: 2, rejected: [] });
+    const all = await w.db.getAllRecords();
+    expect(all).toHaveLength(3);
+    const noted = byUrl(all, 'https://noted.example/');
+    expect(noted.id).toBe(byUrl(fresh, 'https://noted.example/').id);
+    expect(noted.state).toBe('open');
+    expect(noted.live).toBeTruthy();
+    expect(noted.note).toBe('leer');
+    expect(noted.tags).toEqual(['t']);
+    expect(noted.mergedFrom).toEqual([byUrl(o, 'https://noted.example/').id]);
+    expect(byUrl(all, 'https://gone.example/').state).toBe('archived');
+  });
+
   it('bookmarks HTML escapes titles and URLs, one folder per state', () => {
     const base = { domain: 'a', protected: false, pending: false, tags: ['t'], project: '', note: 'n<b>', source: 'tracked' as const,
       createdAt: 1700000000000, updatedAt: 1, origin: {}, previousUrls: [], reopenCount: 0, mergedFrom: [], live: null, pendingClose: null, rev: 1 };
